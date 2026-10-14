@@ -35,3 +35,15 @@ Run those commands from the repository root. The validator needs only Python's s
 Phone dimensions are a recommendation preset, not the only permitted upload size. The studio targets ordinary phone listing artwork. It is not a replacement for dedicated tablet, Wear OS, TV, Automotive or XR capture workflows. Feature graphic composition guides are a local editorial inset, not an official guarantee against every crop.
 
 Review legibility, accurate app content, translated copy, screenshot counts and device coverage before uploading. The validator does not assess these. Google may change its rules; check the [official preview asset guidance](https://support.google.com/googleplay/android-developer/answer/9866151?hl=en-GB). Requirements last reviewed: 2026-10-14.
+
+## Plan and hand off a complete package
+
+Use the creative workflow in `knowledge/play-creatives.md` at the repository root, or `references/knowledge/play-creatives.md` in the installed screenshot skill, before assembling a new sequence: one clear user outcome per capture, UI that demonstrates it, short localized copy, and a locale/device coverage matrix. A typical phone set uses 4–8 frames; the publication minimum and recommendation eligibility are different rules. Planning copy and story does not require building a new Next.js project.
+
+This editor has three color presets with editable colors and one layout for each output type. It exports the selected capture individually. It does not batch-export, reorder captures, upload to Console, create arbitrary slide layouts, or generate device-specific tablet/watch/TV artwork. Define the final sequence in a storyboard or manifest, name exports `phone-01-...`, `phone-02-...`, and set the intended order when uploading.
+
+The locale controls change copy, not the captured UI. RTL languages set Canvas text direction; the feature layout remains text on the left and capture on the right. Review Arabic/Hebrew shaping and mixed numbers/names. If the composition needs mirroring, make an adapted layout in a suitable editor and use an actual RTL app capture; do not horizontally flip the UI image. Different UI language captures require separate projects.
+
+Alt text is stored in the project JSON; it is not transmitted to Console or embedded as listing metadata in the PNG. Hand off the alt text separately with each file. App name and headline are this studio's export prerequisites, not universal Google Play rules; another compliant workflow can use plain in-app captures.
+
+Keep project JSON, source captures, final PNGs and an asset manifest in the product's output folder. Record locale, device, order, source capture/build, headline, alt text and technical/visual/Console verification status. The project embeds full source captures; use sample data when captures contain account information. A saved project is the editable source and changes are not auto-saved.

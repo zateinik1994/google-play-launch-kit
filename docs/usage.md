@@ -26,6 +26,7 @@ UTF-8 (BOM допустим), стандартное quoting CSV. При зап�
 | ads-report | date, campaign_id, currency, cost, impressions, clicks, conversions, conversion_action | Одна строка campaign/day; YYYY-MM-DD, денежный cost, дробные conversions допустимы |
 
 Дополнительные колонки разрешены, но не всегда входят в агрегат. Экспорты сервисов нужно **нормализовать** к этим контрактам: toolkit не обещает разобрать произвольный raw CSV Console/ASO-provider. Сохраняйте raw файл, период, источник, timezone и описание преобразования рядом.
+Для `ads-report` используйте данные одного Ads customer на файл; сопоставление campaign ID с приложением храните рядом и фильтруйте нужные кампании до агрегации. Даты должны быть в полном формате `YYYY-MM-DD`.
 
 ## Интерпретация
 

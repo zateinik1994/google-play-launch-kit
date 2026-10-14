@@ -7,6 +7,8 @@ description: Review Android app release readiness for Google Play using its actu
 
 Подготовь проверяемый аудит конкретного приложения. Следуй языку и объему запроса пользователя; локальный аудит не расширяет поручение до изменения Console, публикации или рекламного расхода.
 
+Выбери режим по поручению: pre-submission audit, проверка конкретной policy/экрана или разбор rejection. При rejection сначала прочитай оригинальное уведомление, package/versionCode, тип enforcement и затронутые tracks; не начинай повторную отправку наугад.
+
 ## Материалы и актуальность
 
 Прочитай [review guide](references/docs/play-review-guide.md). Для листинга дополнительно используй [metadata](references/knowledge/play-metadata.md) и [creatives](references/knowledge/play-creatives.md), только когда они входят в аудит.
@@ -21,7 +23,15 @@ description: Review Android app release readiness for Google Play using its actu
 
 Если есть доступ к работающему приложению, проверь основной путь, отказ в разрешениях, login/reviewer path, покупки/restore и account deletion в применимой части. Не помещай credentials в публичные файлы. Если запуска нет, конкретно укажи какие проверки остались невыполненными.
 
+Для подписок проверяй весь путь от listing/onboarding до paywall и management: что пользователь получает, фактически списываемую цену/период, trial → paid, доступ без покупки если он есть, локализованные условия и cancellation. Сравнивай с реальными products/offers и eligibility, а не только с нарисованным экраном. Рабочие случаи и [App access template](references/docs/play-review-guide.md#шаблон-app-access) находятся в guide.
+
 Не скрывай реальные функции от рецензента, не предлагай обходы review. Исправление текста/документа в авторизованном scope выполняй без отдельного согласования; изменение поведения app, declarations или submission должно соответствовать поручению пользователя.
+
+## Если пришел rejection
+
+Следуй [rejection workflow и шаблону ответа](references/docs/play-review-guide.md#если-получен-rejection-или-другое-enforcement). Сопоставь каждый пункт письма с воспроизводимым сценарием и текущим правилом, затем подготовь diff/evidence и повторную проверку. Различай исправление с resubmission и обоснованную appeal на ошибочное решение. Проверяй соответствующие internal/closed/open/production tracks: старый нарушающий bundle может остаться активным.
+
+Повторный rejection не доказывает скрытую причину отказа: проверь что отправлена исправленная сборка, декларации соответствуют ей, reviewer access работает и указанные artifacts относятся к нужной версии. При недостающем объяснении подготовь предметный запрос по case ID. Ответ и appeal сохраняй как черновик; отправка выполняется только в пределах поручения владельца.
 
 ## Результат
 
@@ -31,6 +41,6 @@ description: Review Android app release readiness for Google Play using its actu
 - Применимое правило: официальный URL, checked date, platform/category scope.
 - Исправление и способ проверить его.
 
-Используй статусы `confirmed`, `unverified`, `not-applicable`; severity `blocker`, `risk`, `improvement`. Не путай отсутствие доказательства с подтвержденным нарушением. Финал должен дать конкретную готовность к следующему шагу и оставшиеся зависимости, не обещать одобрение Google.
+Используй статусы `confirmed`, `unverified`, `not-applicable`; severity `blocker`, `risk`, `improvement`. Не путай отсутствие доказательства с подтвержденным нарушением. Финал должен дать конкретную готовность к следующему шагу и оставшиеся зависимости, не обещать одобрение Google. Для submission/rejection приложи матрицу проверок, короткий owner action list, reviewer instructions без секретов и draft ответа, если он нужен; локальный pass не называй approval или опубликованным релизом.
 
 При установленной копии все references должны существовать локально. Если пакет поврежден и reference недоступен, сообщи точный путь и продолжи аудит по доступным официальным источникам, помечая ограничение.

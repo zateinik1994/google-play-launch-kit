@@ -4,10 +4,13 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 INSTALLER = ROOT/"scripts/install_skills.py"
+
+from scripts.install_skills import runtime_status
 
 
 class InstallerTests(unittest.TestCase):
@@ -22,6 +25,17 @@ class InstallerTests(unittest.TestCase):
             self.assertFalse(dest.exists())
             self.assertEqual(self.install(dest, "--check").returncode, 0)
             self.assertFalse(dest.exists())
+
+    def test_missing_optional_packages_do_not_trigger_import_failure(self):
+        with patch("scripts.install_skills.importlib.util.find_spec", side_effect=ModuleNotFoundError):
+            status = runtime_status()
+        self.assertFalse(status["network_dependencies"])
+        self.assertTrue(status["supported"])
+        self.assertEqual(status["interpreter"], sys.executable)
+
+    def test_runtime_reports_unsupported_interpreter(self):
+        with patch("scripts.install_skills.sys.version_info", (3, 10, 0)):
+            self.assertFalse(runtime_status()["supported"])
 
     def test_conflict_preflight_refuses_whole_install(self):
         with tempfile.TemporaryDirectory() as temp:

@@ -31,7 +31,7 @@ AI-агент начинает с [AGENTS.md](AGENTS.md) и читает нуж�
 | [google-ads-launch](skills/google-ads-launch/SKILL.md) | План, API validateOnly и создание action tCPA campaign в статусе PAUSED |
 | [google-ads-monitoring](skills/google-ads-monitoring/SKILL.md) | Чтение App campaign отчетов через API и анализ нормализованного CSV |
 
-Общая [база знаний](knowledge/) содержит источники и даты проверки. [Различия платформ](docs/platform-differences.md) объясняют адаптацию iOS-процесса к Google Play.
+Общая [база знаний](knowledge/) содержит источники и даты проверки. [Различия платформ](docs/platform-differences.md) объясняют Android-механику, а [сопоставление разделов](FEATURE_PARITY.md) показывает глубину методологии и фактические границы автоматизации относительно iOS-набора.
 
 ## Установка скиллов
 
@@ -53,6 +53,17 @@ AI-агент начинает с [AGENTS.md](AGENTS.md) и читает нуж�
 ```
 
 `--copy` раскрывает внутренние симлинки. Обычное копирование с сохранением ссылок может нарушить пути. Установщик отказывается перезаписывать уже существующий скилл и не меняет другие настройки агента. Для Cursor и других агентов используйте AGENTS.md и инструкции из клона; формат установки зависит от вашего агента.
+
+`--check` также показывает фактический Python, поддержку версии и наличие optional Google API dependencies. Отсутствие сетевых пакетов не мешает offline-командам; credentials и права аккаунта проверяются отдельно.
+
+Для подключения всего клона как локального плагина Claude Code добавлен [.claude-plugin/plugin.json](.claude-plugin/plugin.json):
+
+```bash
+claude plugin validate /absolute/path/to/google-play-launch-kit
+claude --plugin-dir /absolute/path/to/google-play-launch-kit
+```
+
+Используйте этот способ либо установку отдельных скиллов. Manifest и стандартная папка `skills/` описаны в [официальной инструкции Claude Code](https://code.claude.com/docs/en/plugins-reference). Runtime-загрузка плагина не проверена: Claude Code CLI отсутствует в текущем окружении.
 
 ## Проверить инструменты без аккаунта Google
 

@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import hashlib
 import json
 import os
 import re
@@ -286,13 +287,21 @@ def normalize_report(cost_rows, conversion_rows, conversion_action: str) -> list
     def base(key):
         return dict(zip(ADS_FIELDS, (key[0], key[1], key[2], "0", "0", "0", "0", conversion_action)))
 
+    def metrics_for(row):
+        # Google may omit zero-valued metrics, but a non-object is a protocol
+        # error, not evidence that spend or conversions are zero.
+        metrics = row.get("metrics", {})
+        if not isinstance(metrics, dict):
+            raise AdsError("Invalid metrics object in report response.")
+        return metrics
+
     seen = set()
     for row in cost_rows:
         key = get_key(row)
         if key in seen:
             raise AdsError("Duplicate campaign/day cost row; refusing to double-count spend.")
         seen.add(key)
-        metrics = row.get("metrics", {})
+        metrics = metrics_for(row)
         item = base(key)
         item["cost"] = format(_number(metrics.get("costMicros", 0), "costMicros", integer=True) / Decimal(1_000_000), "f")
         for field in ("impressions", "clicks"):
@@ -307,7 +316,7 @@ def normalize_report(cost_rows, conversion_rows, conversion_action: str) -> list
             raise AdsError("Duplicate campaign/day conversion row; refusing to double-count conversions.")
         seen.add(key)
         item = merged.setdefault(key, base(key))
-        item["conversions"] = format(_number(row.get("metrics", {}).get("conversions", 0), "conversions"), "f")
+        item["conversions"] = format(_number(metrics_for(row).get("conversions", 0), "conversions"), "f")
     return [merged[key] for key in sorted(merged)]
 
 
@@ -464,7 +473,13 @@ def main(argv: list[str] | None = None) -> int:
             receipt = Path(args.receipt) if args.receipt else Path("outputs") / f"google-ads-created-{stamp}.json"
             # Check receipt destination before creating remote resources.
             receipt.parent.mkdir(parents=True, exist_ok=True)
-            attempt = {"customer": customer, "apiVersion": version, "name": config["name"]}
+            serialized_config = json.dumps(config, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+            attempt = {
+                "customer": customer, "apiVersion": version, "name": config["name"],
+                "attemptedAt": datetime.now(timezone.utc).isoformat(),
+                "configSha256": hashlib.sha256(serialized_config.encode("utf-8")).hexdigest(),
+                "requestedConfig": config,
+            }
             with receipt.open("x", encoding="utf-8") as handle:
                 json.dump(dict(attempt, status="validation-pending"), handle)
             phase = "validation"
@@ -485,6 +500,9 @@ def main(argv: list[str] | None = None) -> int:
                 except OSError as receipt_error:
                     raise AdsError(f"{exc}\nCould not update failure receipt: {receipt_error}") from exc
                 raise
+            # Retain the actual reviewed request even if the config file is
+            # edited later. This is reconciliation evidence, not an idempotency key.
+            result = dict(attempt, **result)
             try:
                 receipt.write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
             except OSError as exc:

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Install portable skills as symlinks or dereferenced copies; never overwrite."""
 import argparse
+import importlib.util
 import os
 import shutil
 import sys
@@ -10,12 +11,27 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 
 
+def runtime_status():
+    available = {}
+    for module in ("google.auth", "requests"):
+        try:
+            available[module] = importlib.util.find_spec(module) is not None
+        except (ImportError, ModuleNotFoundError, ValueError):
+            available[module] = False
+    return {
+        "interpreter": sys.executable,
+        "version": ".".join(map(str, sys.version_info[:3])),
+        "supported": sys.version_info[:2] >= (3, 11),
+        "network_dependencies": all(available.values()),
+    }
+
+
 def main(argv=None):
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--target", choices=("codex", "claude", "directory"), default="codex")
     p.add_argument("--directory", help="Installation directory; required for --target directory")
     p.add_argument("--copy", action="store_true", help="Dereference shared resources for portable copies")
-    p.add_argument("--check", action="store_true", help="Read installation state without changing anything")
+    p.add_argument("--check", action="store_true", help="Check installation, interpreter and optional network dependencies without changing anything")
     p.add_argument("--dry-run", action="store_true")
     args = p.parse_args(argv)
     if args.directory and args.target != "directory":
@@ -30,6 +46,11 @@ def main(argv=None):
         destination = Path.home()/".claude"/"skills"
     skills = sorted(path for path in (ROOT/"skills").iterdir() if (path/"SKILL.md").is_file())
     if args.check:
+        runtime = runtime_status()
+        print(f"Python: {runtime['interpreter']} ({runtime['version']}) — {'supported' if runtime['supported'] else 'requires 3.11+'}")
+        print("Network dependencies: " + ("available" if runtime["network_dependencies"] else "missing (optional for offline tools)"))
+        if not runtime["network_dependencies"]:
+            print("For network commands, install requirements.txt with this interpreter in your chosen environment.")
         for skill in skills:
             target = destination/skill.name
             state = "not installed"
@@ -38,7 +59,7 @@ def main(argv=None):
             elif target.exists():
                 state = "copied or other installation"
             print(f"{skill.name}: {state}")
-        return 0
+        return 0 if runtime["supported"] else 1
     conflicts = [destination/skill.name for skill in skills if os.path.lexists(destination/skill.name)]
     if conflicts:
         print("Existing skill paths will not be overwritten:\n" + "\n".join(map(str, conflicts)), file=sys.stderr)

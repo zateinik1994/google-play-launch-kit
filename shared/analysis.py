@@ -156,6 +156,8 @@ def ads_report(rows):
             raise ValueError("campaign_id, currency and conversion_action required")
         try:
             date = datetime.strptime(row["date"], "%Y-%m-%d").date()
+            if row["date"] != date.isoformat():
+                raise ValueError("Non-canonical date")
         except ValueError as exc:
             raise ValueError("date: expected YYYY-MM-DD") from exc
         unique = (key[0], row["date"])
@@ -215,4 +217,4 @@ def campaign_plan(config):
         warnings.append("Budget is below 10x target CPA; review Google's current guidance and expected event volume. This is a recommendation, not an API validity rule.")
     return {"state": "DRAFT_ONLY", "campaign_type": "App campaign for in-app actions (target CPA)",
             "proposed_status": "PAUSED", "config": config, "warnings": warnings,
-            "execution": "No Google Ads API mutation is implemented. Apply the reviewed plan in Ads UI or an authorized integration."}
+            "execution": "This brief does not call an API. Convert it to google_ads.py config with resource IDs and micros, then plan/validate. Authorized API creation keeps all serving resources PAUSED."}

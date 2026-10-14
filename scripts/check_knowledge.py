@@ -1,10 +1,32 @@
 #!/usr/bin/env python3
-"""Check canonical resource links and skill frontmatter without third-party modules."""
+"""Check skill metadata, canonical resources and local Markdown links."""
 import re
 import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
+
+
+def check_markdown_links(entry):
+    errors = []
+    fenced = None
+    for line in entry.read_text(encoding="utf-8").splitlines():
+        marker = re.match(r"^\s*(`{3,}|~{3,})(.*)$", line)
+        if marker:
+            if fenced is None:
+                fenced = marker[1]
+            elif marker[1][0] == fenced[0] and len(marker[1]) >= len(fenced) and not marker[2].strip():
+                fenced = None
+            continue
+        if fenced is not None:
+            continue
+        for target in re.findall(r"\[[^\]]*\]\(([^)]+)\)", line):
+            if re.match(r"^[a-zA-Z][\w+.-]*:", target) or target.startswith("#"):
+                continue
+            path = target.split("#", 1)[0]
+            if path and not (entry.parent/path).exists():
+                errors.append(f"{entry}: missing reference {path}")
+    return errors
 
 
 def check(root=ROOT):
@@ -31,12 +53,11 @@ def check(root=ROOT):
                 canonical = root/link.name
                 if not link.is_symlink() or link.resolve() != canonical.resolve():
                     errors.append(f"{link}: should link to canonical {canonical}")
-        for target in re.findall(r"\[[^\]]*\]\(([^)]+)\)", text):
-            if re.match(r"^[a-zA-Z][\w+.-]*:", target) or target.startswith("#"):
-                continue
-            path = target.split("#", 1)[0]
-            if path and not (entry.parent/path).exists():
-                errors.append(f"{entry}: missing reference {path}")
+    documents = set(skills) | set(root.glob("*.md"))
+    for directory in ("knowledge", "docs", "examples"):
+        documents.update((root/directory).rglob("*.md"))
+    for document in sorted(documents):
+        errors.extend(check_markdown_links(document))
     return errors
 
 
@@ -45,5 +66,5 @@ if __name__ == "__main__":
     for error in errors:
         print(error, file=sys.stderr)
     if not errors:
-        print("Skills and canonical references OK")
+        print("Skills, canonical references and local documentation links OK")
     raise SystemExit(bool(errors))

@@ -2,6 +2,7 @@
 
 import contextlib
 import copy
+import hashlib
 import csv
 import io
 import json
@@ -237,6 +238,21 @@ class ReportTests(unittest.TestCase):
             with self.assertRaises(AdsError):
                 normalize_report([data], [], ACTION)
 
+    def test_malformed_metrics_are_protocol_errors_not_zero_results(self):
+        for value in (None, [], "unexpected"):
+            for conversion in (False, True):
+                with self.subTest(value=value, conversion=conversion):
+                    item = row(conversions=2) if conversion else row()
+                    item["metrics"] = value
+                    with self.assertRaisesRegex(AdsError, "metrics object"):
+                        normalize_report([] if conversion else [item], [item] if conversion else [], ACTION)
+
+    def test_omitted_zero_metrics_still_normalize(self):
+        item = row()
+        del item["metrics"]
+        result = normalize_report([item], [], ACTION)[0]
+        self.assertEqual((result["cost"], result["impressions"], result["clicks"]), ("0", "0", "0"))
+
     def test_pagination_fetches_every_page(self):
         class Pages:
             def __init__(self):
@@ -304,6 +320,26 @@ class CLITests(unittest.TestCase):
             self.assertEqual(code, 0)
             self.assertEqual(json.loads(receipt.read_text())["status"], "created-paused")
             self.assertEqual(json.loads(stdout.getvalue())["campaignStatus"], "PAUSED")
+
+    def test_receipt_retains_config_evidence_for_reconciliation(self):
+        for transport in (FakeAdsTransport(), FakeAdsTransport(creation_error=AdsError("Timeout"))):
+            with self.subTest(transport=transport), tempfile.TemporaryDirectory() as directory:
+                path, receipt = Path(directory) / "config.json", Path(directory) / "receipt.json"
+                path.write_text(json.dumps(CONFIG))
+                with patch("shared.google_ads.AdsADCTransport", return_value=transport):
+                    with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+                        main([
+                            "create", "--customer", CUSTOMER, "--api-version", "v25", "--config", str(path),
+                            "--live", "--receipt", str(receipt),
+                        ])
+                result = json.loads(receipt.read_text())
+                serialized = json.dumps(CONFIG, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+                self.assertEqual(result["requestedConfig"], CONFIG)
+                self.assertEqual(result["configSha256"], hashlib.sha256(serialized.encode("utf-8")).hexdigest())
+                self.assertTrue(result["attemptedAt"].endswith("+00:00"))
+                # Changing the source file must not change the saved attempt.
+                path.write_text(json.dumps(dict(CONFIG, target_cpa_micros=9000000)))
+                self.assertEqual(json.loads(receipt.read_text())["requestedConfig"]["target_cpa_micros"], 5000000)
 
     def test_failed_attempt_receipts_record_the_actual_stage(self):
         cases = (

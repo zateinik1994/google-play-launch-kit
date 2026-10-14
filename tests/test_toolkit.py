@@ -82,6 +82,8 @@ class AnalysisTests(unittest.TestCase):
             ads_report([self.ads(), self.ads(conversion_action="purchase")])
         with self.assertRaises(ValueError):
             ads_report([self.ads(cost="NaN")])
+        with self.assertRaises(ValueError):
+            ads_report([self.ads(date="2026-1-1")])
 
     def test_review_id_dedup_and_topic_limits(self):
         result = reviews([{"review_id": "1", "rating": "2", "text": "Crash after payment"}])
