@@ -1,0 +1,12 @@
+{
+  "en-US": {
+    "title": "Ritmo: Habit Tracker",
+    "shortDescription": "Build daily routines with reminders and a clear view of your progress.",
+    "fullDescription": "Create a daily checklist for the habits you want to build. Set reminders and review your weekly progress.\n\nCore habit tracking is free. Advanced reports require an optional subscription.\n\nThis fictional example demonstrates the file format. Replace every claim with a verified feature of your own app."
+  },
+  "ru-RU": {
+    "title": "Ритмо: трекер привычек",
+    "shortDescription": "Ежедневные привычки, напоминания и наглядный прогресс за неделю.",
+    "fullDescription": "Создайте список привычек на каждый день, настройте напоминания и следите за прогрессом за неделю.\n\nОсновной трекер бесплатный. Подробные отчёты доступны по дополнительной подписке.\n\nЭто вымышленный пример формата. Перед публикацией проверьте все функции и условия своего приложения."
+  }
+}

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Android App Campaign Launch"
+  short_description: "План и создание App campaign в статусе PAUSED"
+  default_prompt: "Используй $google-ads-launch, чтобы подготовить кампанию для Android."

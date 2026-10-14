@@ -1,0 +1,4 @@
+interface:
+  display_name: "Google Play Review Readiness"
+  short_description: "Подготовка модерации и разбор отказа Google Play"
+  default_prompt: "Используй $play-policy-review, чтобы проверить готовность к модерации."

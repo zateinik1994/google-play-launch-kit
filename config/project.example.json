@@ -1,0 +1,11 @@
+{
+  "package_name": "com.example.habits",
+  "locales": ["en-US", "ru-RU"],
+  "countries": ["US"],
+  "features": ["Daily habit checklist", "Local reminders", "Weekly progress"],
+  "monetization": "Free core features; optional subscription for advanced reports",
+  "audience": "Adults building daily routines",
+  "privacy_policy_url": "https://example.com/privacy",
+  "support_email": "support@example.com",
+  "note": "Fictional example; replace facts and links with your actual product."
+}

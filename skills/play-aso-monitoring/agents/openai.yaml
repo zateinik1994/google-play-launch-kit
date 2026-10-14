@@ -1,0 +1,4 @@
+interface:
+  display_name: "Google Play ASO Monitoring"
+  short_description: "Сравнение позиций и метрик карточки Play"
+  default_prompt: "Используй $play-aso-monitoring, чтобы сравнить мои ASO-отчеты."

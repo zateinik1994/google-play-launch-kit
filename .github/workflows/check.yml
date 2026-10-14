@@ -1,0 +1,26 @@
+name: Offline checks
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  toolkit:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python: ['3.11', '3.13']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - run: python -m unittest discover -s tests -v
+      - run: python scripts/check_knowledge.py
+      - run: python scripts/playkit.py validate examples/data/listings.json
+      - run: python shared/play_api.py validate --input examples/data/listings.json
+      - run: python shared/play_api.py apply --package com.example.habits --input examples/data/listings.json
+      - run: python scripts/playkit.py keywords examples/data/keywords.csv
+      - run: python scripts/playkit.py ranks examples/data/ranks-before.csv examples/data/ranks-after.csv
+      - run: python scripts/playkit.py reviews examples/data/reviews.csv
+      - run: python scripts/playkit.py ads-report examples/data/ads.csv
+      - run: python scripts/playkit.py ads-plan examples/data/campaign.json
+      - run: python shared/google_ads.py plan --customer 1234567890 --api-version v25 --config examples/data/google-ads-create.json

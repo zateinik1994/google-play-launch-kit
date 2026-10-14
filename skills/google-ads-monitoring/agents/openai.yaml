@@ -1,0 +1,4 @@
+interface:
+  display_name: "Android App Campaign Monitoring"
+  short_description: "Анализ расходов и конверсий App campaigns"
+  default_prompt: "Используй $google-ads-monitoring, чтобы проверить мои рекламные отчеты."

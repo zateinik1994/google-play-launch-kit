@@ -1,0 +1,4 @@
+interface:
+  display_name: "Google Play Metadata API"
+  short_description: "Проверка и загрузка локализованных текстов Play"
+  default_prompt: "Используй $play-metadata, чтобы проверить и подготовить метаданные Google Play."

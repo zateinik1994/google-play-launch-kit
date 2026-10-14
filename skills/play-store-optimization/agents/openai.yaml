@@ -1,0 +1,4 @@
+interface:
+  display_name: "Google Play Optimization"
+  short_description: "Проверка текстов, отзывов и A/B гипотез"
+  default_prompt: "Используй $play-store-optimization, чтобы проверить карточку приложения."

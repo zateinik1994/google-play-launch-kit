@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data: blob:; connect-src 'none'; font-src 'self'; object-src 'none'; base-uri 'none'">
+  <meta name="color-scheme" content="light dark">
+  <title>Play Launch Studio</title>
+  <link rel="stylesheet" href="studio.css">
+  <script src="studio.js" defer></script>
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="#"><span class="brand-mark" aria-hidden="true">P</span><span>Play Launch <b>Studio</b></span></a>
+    <div class="top-actions"><span class="privacy"><span class="dot"></span>Local files only</span><button id="theme" class="quiet" aria-label="Switch studio color theme">Dark mode</button></div>
+  </header>
+  <main>
+    <aside class="controls">
+      <div class="eyebrow">ANDROID LAUNCH KIT</div>
+      <h1>Your app.<br>Your story.</h1>
+      <p class="intro">Turn real app captures into a consistent Google Play screenshot set.</p>
+      <section>
+        <div class="section-title"><h2>01 · Source captures</h2><span id="capture-count">0 / 8</span></div>
+        <label class="upload-zone" for="images"><span class="upload-symbol" aria-hidden="true">＋</span><strong>Add app screenshots</strong><span>PNG or JPEG · up to 8 captures</span></label>
+        <input id="images" type="file" accept="image/png,image/jpeg" multiple class="visually-hidden">
+        <div id="capture-list" class="capture-list" aria-label="Uploaded screenshots"></div>
+        <div id="source-info" class="help">Use captures from the current Android app. The entire image is preserved without cropping.</div>
+      </section>
+      <section>
+        <div class="section-title"><h2>02 · Story & language</h2><button id="add-locale" class="text-button">+ Language</button></div>
+        <label for="locale">Listing language</label>
+        <select id="locale"><option value="en-US">en-US</option><option value="ru-RU">ru-RU</option></select>
+        <label for="app-name">App name</label><input id="app-name" maxlength="30" placeholder="Your app name" autocomplete="off">
+        <label for="headline">Headline <span id="headline-scope">for this capture</span></label><textarea id="headline" rows="2" maxlength="100" placeholder="One clear benefit, grounded in your app"></textarea>
+        <label for="subtitle">Supporting line <span class="optional">optional</span></label><input id="subtitle" maxlength="110" placeholder="A little context, if needed" autocomplete="off">
+        <label for="alt-text">Alt text <span class="optional">saved with config</span></label><textarea id="alt-text" rows="2" maxlength="140" placeholder="Describe the app screen and its purpose"></textarea>
+        <p class="help">Copy is saved separately for each language and capture. Translate your app UI too when appropriate.</p>
+      </section>
+      <section>
+        <h2>03 · Art direction</h2>
+        <div class="palette-presets" aria-label="Color presets"><button data-palette="mint" class="palette mint">Mint</button><button data-palette="ink" class="palette ink">Ink</button><button data-palette="apricot" class="palette apricot">Apricot</button></div>
+        <div class="color-fields"><label>Background<input id="background" type="color" value="#e5f6ef"></label><label>Accent<input id="accent" type="color" value="#3a9475"></label><label>Text<input id="foreground" type="color" value="#12382a"></label></div>
+        <label class="check"><input id="guides" type="checkbox"> Show composition guides <span class="optional">preview only</span></label>
+      </section>
+      <section class="config-actions"><button id="save-config" class="secondary">Save project</button><label for="load-config" class="button secondary">Open project</label><input id="load-config" type="file" accept="application/json,.json" class="visually-hidden"><p class="help">The JSON project includes your captures and all language variants. Keep it with your source files.</p></section>
+    </aside>
+    <section class="workspace" aria-labelledby="preview-title">
+      <div class="workspace-header"><div><div class="eyebrow">LIVE PREVIEW</div><h2 id="preview-title">Phone screenshot</h2></div><div class="format-switch" role="group" aria-label="Preview format"><button data-format="screenshot" class="active" aria-pressed="true">Phone</button><button data-format="feature-graphic" aria-pressed="false">Feature graphic</button></div></div>
+      <div class="canvas-stage"><canvas id="preview" width="1080" height="1920" aria-label="Google Play asset preview">This studio needs a browser with Canvas support.</canvas></div>
+      <div class="preview-meta"><span id="size-label">1080 × 1920 · 9:16</span><span>RGB PNG · no transparency</span></div>
+      <div class="export-row"><p id="export-note">Add a real app capture to enable export.</p><button id="export" class="primary" disabled>Export PNG <span aria-hidden="true">↗</span></button></div>
+      <p id="status" class="status" role="status" aria-live="polite"></p>
+      <details class="requirements"><summary>Google Play dimensions & content</summary><p>This studio exports phone assets at 1080 × 1920 and feature graphics at 1024 × 500. Phone screenshot uploads permit dimensions from 320 to 3840 px, with the longer side no more than twice the shorter side. JPEG or 24-bit PNG without alpha is required.</p><p>Use at least two screenshots for a listing. For recommendation formats, Google asks for at least four app screenshots (three for games) in 9:16 or 16:9 at 1080 px minimum. Show the real app, keep taglines brief, avoid rankings, pricing claims and store badges. Previewing or exporting does not validate content or approve an upload.</p><a href="https://support.google.com/googleplay/android-developer/answer/9866151?hl=en-GB" target="_blank" rel="noopener noreferrer">Official Google Play preview asset guidelines ↗</a></details>
+    </section>
+  </main>
+  <dialog id="locale-dialog"><form method="dialog"><h2>Add a language</h2><label for="locale-code">Locale code</label><input id="locale-code" placeholder="de-DE" maxlength="20" autocomplete="off"><p class="help">Use a language tag, for example de-DE, es-ES or pt-BR. Copy starts empty.</p><div class="dialog-actions"><button value="cancel" class="secondary">Cancel</button><button id="confirm-locale" value="add" class="primary">Add language</button></div></form></dialog>
+</body>
+</html>

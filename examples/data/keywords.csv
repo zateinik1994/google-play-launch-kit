@@ -1,0 +1,4 @@
+query,locale,country,source,relevance,volume,volume_source,note
+habit tracker,en-US,US,manual product brief,3,,,Fictional example; volume unknown
+daily routine,en-US,US,manual product brief,3,,,Matches daily checklist feature
+calorie tracker,en-US,US,manual product brief,0,,,Unsupported feature; exclude from final metadata

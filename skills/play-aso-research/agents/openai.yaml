@@ -1,0 +1,4 @@
+interface:
+  display_name: "Google Play ASO Research"
+  short_description: "Исследование запросов и текстов Google Play"
+  default_prompt: "Используй $play-aso-research, чтобы подготовить ASO для моего Android-приложения."

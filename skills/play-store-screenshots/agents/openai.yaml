@@ -1,0 +1,4 @@
+interface:
+  display_name: "Google Play Screenshot Studio"
+  short_description: "Графика Google Play из реальных экранов Android"
+  default_prompt: "Используй $play-store-screenshots, чтобы сделать графику Google Play."

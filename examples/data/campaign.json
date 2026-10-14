@@ -1,0 +1,12 @@
+{
+  "package_name": "com.example.habits",
+  "countries": ["US"],
+  "languages": ["en"],
+  "currency": "USD",
+  "daily_budget": 50,
+  "target_cpa": 5,
+  "conversion_action": "subscription_started",
+  "headlines": ["Build a daily routine", "Track your habits"],
+  "descriptions": ["Create a daily checklist and follow your progress.", "Set reminders for the habits that matter to you."],
+  "note": "Fictional brief. Event, pricing, eligibility and text must be checked before launch."
+}
