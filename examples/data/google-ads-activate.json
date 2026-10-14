@@ -1,0 +1,16 @@
+{
+  "package_name": "com.example.focus",
+  "currency": "USD",
+  "changes": [
+    {
+      "campaign_id": "77",
+      "status": "ENABLED",
+      "ad_group_resources": [
+        "customers/1234567890/adGroups/99"
+      ],
+      "ad_group_ad_resources": [
+        "customers/1234567890/adGroupAds/99~111"
+      ]
+    }
+  ]
+}

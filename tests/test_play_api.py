@@ -6,9 +6,11 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from shared.play_api import (
+    ADCTransport,
     APIError,
     PlayError,
     PlayPublisher,
@@ -206,6 +208,25 @@ class PublisherTests(unittest.TestCase):
 
 
 class LocalTests(unittest.TestCase):
+    def test_transport_rejects_redirected_write_without_following_location(self):
+        calls = []
+        def request(method, url, **kwargs):
+            calls.append((method, url, kwargs))
+            return SimpleNamespace(
+                status_code=302, content=b"redirect", headers={"Location": "https://other.example/write"},
+                json=lambda: {"error": {"message": "Redirect response"}},
+            )
+        transport = ADCTransport.__new__(ADCTransport)
+        transport.timeout = 1
+        transport.session = SimpleNamespace(request=request)
+        with self.assertRaises(APIError) as raised:
+            transport.request("POST", "https://androidpublisher.googleapis.com/androidpublisher/v3/applications/com.example.focus/dataSafety",
+                              payload={"safetyLabels": "synthetic CSV"})
+        self.assertEqual(raised.exception.status, 302)
+        self.assertEqual(len(calls), 1)
+        self.assertFalse(calls[0][2]["allow_redirects"])
+        self.assertNotIn("other.example", calls[0][1])
+
     def test_local_plan_lists_only_changed_fields(self):
         plan = plan_listings(DESIRED, CURRENT)
         self.assertTrue(plan["baselineProvided"])

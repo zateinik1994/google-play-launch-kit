@@ -14,7 +14,7 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Mapping, Protocol
-from urllib.parse import quote, urlencode
+from urllib.parse import quote, urlencode, urlsplit
 
 try:
     from .metadata import validate_listings
@@ -74,7 +74,7 @@ class ADCTransport:
             url += "?" + urlencode(query)
         try:
             response = self.session.request(
-                method, url, json=payload, timeout=self.timeout
+                method, url, json=payload, timeout=self.timeout, allow_redirects=False
             )
         except Exception as exc:
             # Do not print an exception that could contain credential material.
@@ -96,6 +96,80 @@ class ADCTransport:
         if not isinstance(result, dict):
             raise PlayError("Google Play returned a non-object JSON response.")
         return result
+
+    def upload_media(self, url, path, mime, *, resumable=False):
+        """Upload binary media; a failed write is never repeated automatically."""
+        parsed = urlsplit(url)
+        if parsed.scheme != "https" or parsed.hostname not in {"androidpublisher.googleapis.com", "www.googleapis.com"} or parsed.username or parsed.password:
+            raise PlayError("Media upload requires an approved Google HTTPS endpoint.")
+        path = Path(path)
+        size = path.stat().st_size
+        try:
+            if resumable:
+                initial = self.session.request("POST", url + "?uploadType=resumable", data=b"",
+                    headers={"X-Upload-Content-Type": mime, "X-Upload-Content-Length": str(size)},
+                    timeout=self.timeout, allow_redirects=False)
+                self._media_response(initial, allow_empty=True)
+                location = initial.headers.get("Location", "")
+                parsed = urlsplit(location)
+                if parsed.scheme != "https" or parsed.hostname not in {"androidpublisher.googleapis.com", "www.googleapis.com"} or parsed.username or parsed.password:
+                    raise PlayError("Upload session returned an unsafe or missing Location.")
+                method, target = "PUT", location
+            else:
+                method, target = "POST", url + "?uploadType=media"
+            with path.open("rb") as stream:
+                response = self.session.request(method, target, data=stream,
+                    headers={"Content-Type": mime, "Content-Length": str(size)},
+                    timeout=max(120, self.timeout), allow_redirects=False)
+            return self._media_response(response)
+        except PlayError:
+            raise
+        except Exception as exc:
+            raise PlayError(f"{type(exc).__name__} during media upload; outcome unknown, no automatic retry.") from exc
+
+    @staticmethod
+    def _media_response(response, *, allow_empty=False):
+        if not 200 <= response.status_code < 300:
+            # Do not expose signed session URLs, request bodies or credentials.
+            raise APIError(response.status_code, "Media request failed; inspect edit state before retrying.")
+        if allow_empty and not response.content:
+            return {}
+        try:
+            result = response.json()
+        except ValueError as exc:
+            raise PlayError("Media response is invalid JSON; upload outcome unknown.") from exc
+        if not isinstance(result, dict):
+            raise PlayError("Media response is not an object; upload outcome unknown.")
+        return result
+
+    def download_bytes(self, url, *, limit=64 * 1024 * 1024):
+        """Download a public image without forwarding the Publisher bearer token."""
+        import requests
+        for _ in range(4):
+            parsed = urlsplit(url)
+            host = parsed.hostname or ""
+            if parsed.scheme != "https" or parsed.username or parsed.password or not (
+                host.endswith(".googleusercontent.com") or host.endswith(".gstatic.com")
+            ):
+                raise PlayError("Backup image URL must use an approved Google image HTTPS host.")
+            try:
+                with requests.get(url, stream=True, timeout=self.timeout, allow_redirects=False) as response:
+                    if response.status_code in (301, 302, 303, 307, 308):
+                        url = response.headers.get("Location", "")
+                        continue
+                    if response.status_code != 200:
+                        raise APIError(response.status_code, "Could not download image backup.")
+                    data = bytearray()
+                    for chunk in response.iter_content(65536):
+                        data.extend(chunk)
+                        if len(data) > limit:
+                            raise PlayError("Backup image exceeds download limit.")
+                    return bytes(data)
+            except PlayError:
+                raise
+            except Exception as exc:
+                raise PlayError(f"{type(exc).__name__} while downloading image backup.") from exc
+        raise PlayError("Too many redirects downloading backup image.")
 
 
 def listing_map(response: Mapping[str, Any]) -> dict[str, dict[str, str]]:
@@ -217,6 +291,21 @@ class PlayPublisher:
     def delete_edit(self, edit_id: str):
         return self.transport.request("DELETE", self._edit_url(edit_id))
 
+    def commit_edit(self, edit, *, changes_not_sent_for_review=False):
+        query = {"changesInReviewBehavior": "ERROR_IF_IN_REVIEW"}
+        if changes_not_sent_for_review:
+            query["changesNotSentForReview"] = "true"
+        try:
+            response = self.transport.request("POST", f"{self._edit_url(edit.id)}:commit", query=query)
+            if not isinstance(response.get("id"), str) or not response["id"]:
+                raise PlayError("Commit response did not contain an edit ID.")
+        except PlayError as exc:
+            if not isinstance(exc, APIError) or exc.status == 408 or exc.status >= 500:
+                raise PlayError(f"Commit outcome is unknown for edit {edit.id}; check Play Console before retrying. Deleting an edit cannot undo a successful commit.") from exc
+            raise
+        edit.committed = True
+        return response
+
     def list_listings(self) -> dict[str, dict[str, str]]:
         # Listing API requires an edit; even this read invalidates an earlier
         # edit owned by the same account. Keep the edit short and discard it.
@@ -250,23 +339,7 @@ class PlayPublisher:
                     payload=desired_listing(language, desired[language], current.get(language)),
                 )
             self.transport.request("POST", f"{base_url}:validate")
-            query: dict[str, str] = {"changesInReviewBehavior": "ERROR_IF_IN_REVIEW"}
-            if changes_not_sent_for_review:
-                query["changesNotSentForReview"] = "true"
-            try:
-                response = self.transport.request("POST", f"{base_url}:commit", query=query)
-                if not isinstance(response.get("id"), str) or not response["id"]:
-                    raise PlayError("Commit response did not contain an edit ID.")
-            except PlayError as exc:
-                uncertain = not isinstance(exc, APIError) or exc.status == 408 or exc.status >= 500
-                if uncertain:
-                    raise PlayError(
-                        f"Commit outcome is unknown for edit {edit.id}: {exc}. "
-                        "Check Play Console before retrying. Deleting an edit cannot "
-                        "undo a successful commit."
-                    ) from exc
-                raise
-            edit.committed = True
+            self.commit_edit(edit, changes_not_sent_for_review=changes_not_sent_for_review)
             return {"status": "committed", "editId": edit.id, "plan": plan}
 
 

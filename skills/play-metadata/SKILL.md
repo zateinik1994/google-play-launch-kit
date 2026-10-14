@@ -1,6 +1,6 @@
 ---
 name: play-metadata
-description: Подготовка, локализация, проверка и экспорт текстов карточки Android-приложения в Google Play, а также применение согласованных метаданных через Android Publisher API. Используй для названия, краткого и полного описания, ссылки на видео и передачи текстов в Play Console.
+description: Подготовка и локализация карточки Google Play, проверка/diff и применение main listing текста, графики, контактов, AAB и release tracks через Android Publisher API с backup и явным live режимом.
 ---
 
 # Google Play metadata
@@ -52,4 +52,35 @@ python3 <skill-directory>/references/shared/play_api.py apply --package com.exam
 
 Верни готовый JSON или согласованное изменение, перечень локалей/полей, существенные редакторские решения и фактическую стадию: draft → local validation → server validate → commit → visible listing. Для live приложи edit ID и путь backup, для ошибки — этап и действие восстановления. При text-only поручении API-доступ не является препятствием.
 
-Скриншоты, AAB, release notes/tracks, privacy policy URL, Data safety, custom store listings и запуск Google Ads этим CLI не поддерживаются. Передай такие задачи соответствующему workflow или подготовь инструкции для Console, не добавляй вымышленные JSON-поля.
+Для графики/AAB/tracks используй release workflow ниже. Privacy policy URL, Data safety, custom listings/experiments и реклама относятся к другим интерфейсам; не добавляй их поля в Listing JSON.
+
+## Графика, AAB и выпуск
+
+Прочитай раздел assets/releases в [Publisher guide](references/docs/play-api.md). `references/shared/play_release.py` объединяет выбранные операции в одном edit: main listing, contacts/defaultLanguage, images, AAB upload и releases существующих tracks. Это отдельный config; пример без реальных артефактов — [play-release.example.json](references/examples/data/play-release.example.json).
+
+Подготовь config и файлы с точным package/локалями/track IDs, явно выбранными status/versionCodes и долей rollout. Images поддерживают append/replace/delete/reorder по language/type; порядок задается files или полным списком current IDs. Для bundle укажи AAB и expected versionCode, затем используй `$uploaded` в release для ответа реального upload. Нужные старые версии включай в полный desired releases массив. Draft, internal/closed delivery и production completed/inProgress имеют разные последствия; не угадывай статус по названию поручения.
+
+```bash
+python3 <skill-directory>/references/shared/play_release.py plan --config release.json
+python3 <skill-directory>/references/shared/play_release.py snapshot --package com.example.app --live --output before.json
+python3 <skill-directory>/references/shared/play_release.py plan --config release.json --current before.json
+python3 <skill-directory>/references/shared/play_release.py validate --config release.json --live --backup-directory outputs/validation-01
+python3 <skill-directory>/references/shared/play_release.py apply --config release.json --live --backup-directory outputs/release-01
+```
+
+Без `--live` команды offline. Server validate ставит assets/AAB/tracks во временный edit, проверяет и удаляет его без commit; это отличается от чтения. Live apply резервирует свежие text/details/tracks и оригинальные image binaries с проверкой server hashes **до** первого upload/PUT/DELETE. Ошибка backup блокирует запись. Удаление locale резервирует ее assets; reorder повторно загружает сохраненные оригиналы в заданном порядке. Phone/tablet/icon/feature проходят canonical техническую image validation; реальное device/policy QA и серверная проверка нужны для всех assets.
+
+Используй существующее разрешение пользователя на конкретный config/операции. До commit проверь release readiness, signing/build/SDK пригодность и Console declarations по доступным данным. Tool не обходит testing/production access, review и publishing settings. При unknown commit проверь Console и `transaction.json` до повторного запуска. `rollback.json` — готовый config нового восстановительного edit, не автоматический undo: сначала проверь план и существующее поручение на восстановление.
+
+Результат включает backup directory, edit ID, реальный uploaded versionCode, переданные track statuses/fractions и фактический committed/validated-only/unknown status. Notes ограничены 500 Unicode code points на locale, server подтверждает поддержку. Для подтверждения delivery после commit проверь track/карточку; production не считается видимым только по ответу API. Data safety, custom listings/experiments и Google Ads используют другие интерфейсы; unsupported API endpoints не выдумывай.
+
+## Data safety из подготовленного CSV
+
+Для поручения на запись декларации прочитай Data safety раздел [API guide](references/docs/play-api.md). `references/shared/play_safety.py` использует официальный `applications.dataSafety` вне edit. Используй подготовленный evidence-backed CSV текущего Console формата; не выводи data flows из одной permission и не заполняй ответы автоматически на глаз.
+
+```bash
+python3 <skill-directory>/references/shared/play_safety.py plan --package com.example.app --csv data-safety.csv
+python3 <skill-directory>/references/shared/play_safety.py apply --package com.example.app --csv data-safety.csv --before-csv before-data-safety.csv --backup-directory outputs/safety-01 --live
+```
+
+Plan и apply без --live offline. Live требует текущий before CSV, потому что у метода нет declaration GET/validateOnly; before/proposed/receipt сохраняются до POST. Синтаксическая проверка не подтверждает conditional полноту или правдивость SDK declarations. Учитывай уже данное разрешение на конкретную запись. Acceptance называется submitted; policy review/видимость labels проверяются отдельно. При unknown outcome сначала проверь Console, не повторяй POST автоматически.

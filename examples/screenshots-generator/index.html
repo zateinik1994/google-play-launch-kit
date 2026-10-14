@@ -7,6 +7,7 @@
   <meta name="color-scheme" content="light dark">
   <title>Play Launch Studio</title>
   <link rel="stylesheet" href="studio.css">
+  <script src="engine.js" defer></script>
   <script src="studio.js" defer></script>
 </head>
 <body>
@@ -20,11 +21,13 @@
       <h1>Your app.<br>Your story.</h1>
       <p class="intro">Turn real app captures into a consistent Google Play screenshot set.</p>
       <section>
-        <div class="section-title"><h2>01 · Source captures</h2><span id="capture-count">0 / 8</span></div>
-        <label class="upload-zone" for="images"><span class="upload-symbol" aria-hidden="true">＋</span><strong>Add app screenshots</strong><span>PNG or JPEG · up to 8 captures</span></label>
+        <div class="section-title"><h2>01 · Source captures</h2><span id="capture-count">0 / 24</span></div>
+        <label for="upload-device">Device of the new captures</label><select id="upload-device"><option value="phone">Phone</option><option value="tablet-7">7-inch tablet</option><option value="tablet-10">10-inch tablet</option></select>
+        <label class="upload-zone" for="images"><span class="upload-symbol" aria-hidden="true">＋</span><strong>Add app screenshots</strong><span>PNG or JPEG · up to 8 per device</span></label>
         <input id="images" type="file" accept="image/png,image/jpeg" multiple class="visually-hidden">
         <div id="capture-list" class="capture-list" aria-label="Uploaded screenshots"></div>
         <div id="source-info" class="help">Use captures from the current Android app. The entire image is preserved without cropping.</div>
+        <label for="locale-image">UI source for the selected language</label><input id="locale-image" type="file" accept="image/png,image/jpeg"><button id="clear-locale-source" class="text-button" disabled>Use default UI source</button>
       </section>
       <section>
         <div class="section-title"><h2>02 · Story & language</h2><button id="add-locale" class="text-button">+ Language</button></div>
@@ -34,18 +37,25 @@
         <label for="headline">Headline <span id="headline-scope">for this capture</span></label><textarea id="headline" rows="2" maxlength="100" placeholder="One clear benefit, grounded in your app"></textarea>
         <label for="subtitle">Supporting line <span class="optional">optional</span></label><input id="subtitle" maxlength="110" placeholder="A little context, if needed" autocomplete="off">
         <label for="alt-text">Alt text <span class="optional">saved with config</span></label><textarea id="alt-text" rows="2" maxlength="140" placeholder="Describe the app screen and its purpose"></textarea>
-        <p class="help">Copy is saved separately for each language and capture. Translate your app UI too when appropriate.</p>
+        <p class="help">Copy and optional UI source overrides are saved per language/capture. RTL layouts mirror the composition, preserving the actual capture.</p>
       </section>
       <section>
         <h2>03 · Art direction</h2>
         <div class="palette-presets" aria-label="Color presets"><button data-palette="mint" class="palette mint">Mint</button><button data-palette="ink" class="palette ink">Ink</button><button data-palette="apricot" class="palette apricot">Apricot</button></div>
         <div class="color-fields"><label>Background<input id="background" type="color" value="#e5f6ef"></label><label>Accent<input id="accent" type="color" value="#3a9475"></label><label>Text<input id="foreground" type="color" value="#12382a"></label></div>
+        <label for="profile">Screenshot dimensions / device</label><select id="profile"></select>
+        <label for="layout-scope">Apply layout changes to</label><select id="layout-scope"><option value="capture">Selected capture</option><option value="profile">Profile default</option></select>
+        <label for="layout">Layout</label><select id="layout"><option value="stacked">Headline above UI</option><option value="split">Headline beside UI</option><option value="ui-only">UI only (tablet default)</option></select>
+        <label for="text-ratio">Text region <span id="text-ratio-value">18%</span></label><input id="text-ratio" type="range" min="12" max="60" value="18">
+        <label for="image-scale">UI size within its region <span id="image-scale-value">100%</span></label><input id="image-scale" type="range" min="50" max="100" value="100">
+        <details><summary>Custom screenshot size</summary><div class="dimension-fields"><label>Width<input id="custom-width" type="number" min="320" max="7680" step="1" value="1080"></label><label>Height<input id="custom-height" type="number" min="320" max="7680" step="1" value="1920"></label></div><button id="apply-custom" class="secondary">Add custom profile</button><p class="help">Phone: 320–3840 px, aspect ≤2:1. Tablet: 1080–7680 px, 9:16/16:9. Renderer limit: 24 megapixels. Feature graphic stays 1024×500.</p></details>
         <label class="check"><input id="guides" type="checkbox"> Show composition guides <span class="optional">preview only</span></label>
       </section>
       <section class="config-actions"><button id="save-config" class="secondary">Save project</button><label for="load-config" class="button secondary">Open project</label><input id="load-config" type="file" accept="application/json,.json" class="visually-hidden"><p class="help">The JSON project includes your captures and all language variants. Keep it with your source files.</p></section>
+      <section><div class="section-title"><h2>04 · Batch export</h2><button id="all-locales" class="text-button">All languages</button></div><div id="batch-locales" class="check-list"></div><label>Export profiles</label><div id="batch-presets" class="check-list"></div><label class="check"><input id="batch-feature" type="checkbox" checked> Include feature graphic for each language</label><p class="help">Feature source: <span id="feature-source"></span></p><p class="help">Only captures for the profile's actual device are exported. All selected copy must fit; missing UI overrides use the default capture and are marked in the manifest.</p><button id="export-batch" class="primary" disabled>Export ZIP + manifests</button></section>
     </aside>
     <section class="workspace" aria-labelledby="preview-title">
-      <div class="workspace-header"><div><div class="eyebrow">LIVE PREVIEW</div><h2 id="preview-title">Phone screenshot</h2></div><div class="format-switch" role="group" aria-label="Preview format"><button data-format="screenshot" class="active" aria-pressed="true">Phone</button><button data-format="feature-graphic" aria-pressed="false">Feature graphic</button></div></div>
+      <div class="workspace-header"><div><div class="eyebrow">LIVE PREVIEW</div><h2 id="preview-title">Phone screenshot</h2></div><div class="format-switch" role="group" aria-label="Preview format"><button data-format="screenshot" class="active" aria-pressed="true">Screenshot</button><button data-format="feature-graphic" aria-pressed="false">Feature graphic</button></div></div>
       <div class="canvas-stage"><canvas id="preview" width="1080" height="1920" aria-label="Google Play asset preview">This studio needs a browser with Canvas support.</canvas></div>
       <div class="preview-meta"><span id="size-label">1080 × 1920 · 9:16</span><span>RGB PNG · no transparency</span></div>
       <div class="export-row"><p id="export-note">Add a real app capture to enable export.</p><button id="export" class="primary" disabled>Export PNG <span aria-hidden="true">↗</span></button></div>

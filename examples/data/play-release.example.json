@@ -1,0 +1,29 @@
+{
+  "package_name": "com.example.habits",
+  "listings": {
+    "en-US": {
+      "title": "Habit Checklist",
+      "shortDescription": "Keep a daily checklist of your habits.",
+      "fullDescription": "Create a daily checklist and mark your habits as complete."
+    }
+  },
+  "details": {
+    "contactEmail": "support@example.com",
+    "contactWebsite": "https://example.com"
+  },
+  "tracks": [
+    {
+      "track": "internal",
+      "releases": [
+        {
+          "name": "Example draft 42",
+          "status": "draft",
+          "versionCodes": ["42"],
+          "releaseNotes": [
+            {"language": "en-US", "text": "Improved daily checklist."}
+          ]
+        }
+      ]
+    }
+  ]
+}

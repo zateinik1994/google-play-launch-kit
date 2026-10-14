@@ -1,0 +1,11 @@
+{
+  "package_name": "com.example.focus",
+  "currency": "USD",
+  "changes": [
+    {
+      "campaign_id": "77",
+      "daily_budget_micros": 60000000,
+      "target_cpa_micros": 6000000
+    }
+  ]
+}

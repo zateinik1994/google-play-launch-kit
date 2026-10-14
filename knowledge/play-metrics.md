@@ -88,7 +88,7 @@ Guardrails выбирать по задаче: успешный первый з�
 6. Рассмотреть current Console status/interval, practical effect, gates и guardrails. Решения: apply в разрешенном scope, keep control, continue, draw/inconclusive или остановить из-за проблемы.
 7. Сохранить результаты и rationale; после фактического применения проверить отображение и доступные продуктовые показатели. Draft plan, test configured, running, completed и applied — разные статусы.
 
-Toolkit не создает эксперименты, не считает statistical power и не объявляет winner автоматически. Multi-element concept test допустим как общая гипотеза, но не измеряет вклад каждого изменения. Title/другие неподдерживаемые поверхности требуют иного дизайна; before/after остается наблюдением с альтернативными объяснениями.
+Toolkit не создает эксперименты и не объявляет winner автоматически. [Offline planner](../docs/aso-tools.md) оценивает sample size/traffic/duration для независимых двух пропорций с равным распределением и Bonferroni для 1–2 variants; это planning estimate, не повторение движка Console. Multi-element concept test допустим как общая гипотеза, но не измеряет вклад каждого изменения. Title/другие неподдерживаемые поверхности требуют иного дизайна; before/after остается наблюдением с альтернативными объяснениями.
 
 ## Связь ASO, рекламы и экономики
 

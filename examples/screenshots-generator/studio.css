@@ -120,3 +120,11 @@ main{display:flex;flex-direction:column}
 canvas{max-height:580px}
 .capture-list{grid-template-columns:repeat(4,1fr)}
 }
+.capture-actions{display:flex;justify-content:center;gap:3px;margin-top:4px}
+.capture-actions button{background:var(--surface);border:1px solid var(--line);border-radius:4px;color:var(--ink);width:24px;height:22px;padding:0;font-size:12px}
+.dimension-fields{display:grid;grid-template-columns:1fr 1fr;gap:9px}
+.controls details{font-size:11px;color:var(--muted);line-height:1.6;margin:16px 0}
+.controls summary{cursor:pointer;color:var(--ink)}
+input[type=range]{padding:0!important;accent-color:var(--green)}
+.check-list{display:flex;flex-direction:column;gap:2px}.check-list .check{margin:4px 0}
+#export-batch{margin-top:14px;width:100%}#locale-image{font-size:10px;width:100%}

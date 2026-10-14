@@ -1,0 +1,22 @@
+{
+  "name": "Focus Timer — Android installs — US",
+  "package_name": "com.example.focus",
+  "currency": "USD",
+  "daily_budget_micros": 50000000,
+  "country_resources": [
+    "geoTargetConstants/2840"
+  ],
+  "language_resources": [
+    "languageConstants/1000"
+  ],
+  "headlines": [
+    "Build a focus routine",
+    "Plan your next session"
+  ],
+  "descriptions": [
+    "Start a focus session, take a break, and follow your progress."
+  ],
+  "contains_eu_political_advertising": false,
+  "goal": "install-volume",
+  "target_cpi_micros": 1500000
+}

@@ -21,6 +21,9 @@ jobs:
         with:
           node-version: '22'
       - run: node --check examples/screenshots-generator/studio.js
+      - run: node --check examples/screenshots-generator/engine.js
+      - run: node --check examples/screenshots-generator/export.cjs
+      - run: node --test examples/screenshots-generator/tests/engine.test.cjs
       - run: python scripts/playkit.py validate examples/data/listings.json
       - run: python shared/play_api.py validate --input examples/data/listings.json
       - run: python shared/play_api.py apply --package com.example.habits --input examples/data/listings.json
@@ -30,3 +33,14 @@ jobs:
       - run: python scripts/playkit.py ads-report examples/data/ads.csv
       - run: python scripts/playkit.py ads-plan examples/data/campaign.json
       - run: python shared/google_ads.py plan --customer 1234567890 --api-version v25 --config examples/data/google-ads-create.json
+      - run: python shared/google_ads.py plan --customer 1234567890 --api-version v25 --config examples/data/google-ads-install.json
+      - run: python shared/play_release.py plan --config examples/data/play-release.example.json
+      - run: python shared/appstorespy.py query --body examples/data/provider-query.json
+      - run: |
+          python shared/store_data.py profiles --package com.example.habits --locale en-GB --country GB --fixture examples/data/public-play-fixture.json --output /tmp/play-profiles.json
+          python shared/aso_tools.py discover --profiles /tmp/play-profiles.json --seed 'habit tracker' --output /tmp/play-candidates.json
+          python shared/aso_tools.py gaps --keywords /tmp/play-candidates.json --listings examples/data/listings.json --output /tmp/play-gaps.json
+          python shared/aso_tools.py experiment --baseline-rate 0.08 --mde-relative 0.15 --daily-visitors 1000 --output /tmp/play-experiment.json
+          python shared/play_reports.py normalize --input examples/data/play-performance.csv --output /tmp/play-performance.json
+          python shared/play_reports.py summary --input /tmp/play-performance.json --output /tmp/play-performance-summary.json
+          python shared/ads_manage.py plan --config examples/data/google-ads-update.json --current examples/data/google-ads-snapshot.json --output /tmp/play-ads-plan.json

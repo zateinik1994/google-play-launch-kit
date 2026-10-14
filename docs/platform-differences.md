@@ -33,10 +33,10 @@
 
 ## Объем визуального инструментария
 
-Оригинальный screenshot skill предлагает построение Next.js генератора и iPhone/iPad mockups. Здесь поставляется готовая local Canvas studio: реальные captures, три редактируемых color presets, copy/locales, сохранение проекта и RGB PNG phone/feature exports. Отсутствие Next.js и hardware mockup — выбор реализации. Студия не создает произвольные slide layouts, не зеркалит feature composition под RTL, не выпускает отдельные tablet/Wear/TV/Automotive/XR assets и не делает автоматический upload/batch export. Эти задачи выполняются по brief отдельным capture/layout workflow; не обещать их как существующие кнопки.
+Оригинальный screenshot skill предлагает построение Next.js генератора и iPhone/iPad mockups. Здесь поставляется готовая local Canvas studio: реальные default/localized captures, reorder, три editable palettes, stacked/split/UI-only layouts и ratios по профилю/кадру, portrait/landscape phone/tablet и custom sizes, RTL text/composition, v1→v2 project migration и batch ZIP с RGB PNG/manifest. Optional Node/Playwright CLI повторяет export сохраненного проекта. Отсутствие Next.js и hardware mockup — выбор реализации. Произвольные vector layouts, Wear/TV/Automotive/XR profiles и автозахват исходного приложения требуют отдельного workflow.
 
 ## Чего этот репозиторий не доказывает
 
-Набор не имеет доступа к developer account сам по себе, не публикует приложение, не создает рекламный расход и не гарантирует одобрение или рост. CLI может проверить локальные данные и подготовить результаты; marketplace metrics и policies остаются внешними источниками. Без доступа к Console анализ помечается как частичный.
+Набор не имеет доступа к developer account сам по себе и не гарантирует одобрение или рост. При явно настроенном доступе и разрешенном `--live` CLI может отправлять Publisher changes и Ads mutations; `ENABLED` может начать рекламный расход. Offline plan и validateOnly не подтверждают публикацию. Метрики и policies остаются внешними источниками; без нужного доступа анализ помечается как частичный.
 
 Подробные правила находятся в [knowledge](../knowledge/play-foundations.md), практическая подготовка — в [review guide](play-review-guide.md). Открывать официальные ссылки снова перед фактическим submission, поскольку отчетность, eligibility и deadlines изменяются.

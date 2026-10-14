@@ -1,6 +1,6 @@
 ---
 name: play-aso-monitoring
-description: Сравнить органические позиции Android-приложения и показатели Google Play по предоставленным наблюдениям и отчетам, подготовить план следующей итерации ASO.
+description: Собрать и сравнить позиции Android-приложения, загрузить и разобрать показатели Google Play, подготовить следующую итерацию ASO.
 ---
 
 # Мониторинг ASO Google Play
@@ -13,11 +13,17 @@ description: Сравнить органические позиции Android-п
 
 Составь timeline фактических событий: текст/графика появились в магазине, release rollout, price/paywall/availability, сбои/vitals, рекламные кампании, experiment, внешние переходы и сезонность. Если baseline отсутствует, текущий снимок является исходной точкой; отчет «изменение после обновления» без старых данных невозможен.
 
-Этот набор не выгружает Console performance, позиции или конкурентов автоматически. Используй доступные источники и экспорты, сохраняй raw данные и описание нормализации. API текста карточки не является API метрик. Регулярное расписание создавай только по поручению пользователя средствами доступного агента.
+Для свежих позиций/конкурентов используй [bounded public collector или AppStoreSpy](references/docs/aso-data-api.md); для разрешенного report bucket — [GCS download/normalization](references/docs/play-reports-api.md). Сохраняй raw данные и описание нормализации. Новые click reports могут требовать экспорт из Console; наличие legacy GCS пути не подтверждает их доступность. Регулярное расписание создавай только по поручению пользователя средствами доступного агента.
 
 ## 2. Проверь сопоставимость позиций и метрик
 
 CSV-снимки позиций должны иметь колонки `observed_at,package_name,locale,country,query,rank,depth,source`. Timestamp — ISO-8601 с часовым поясом. `rank` — место начиная с 1; пустое значение означает «не найдено в первых depth», а не ноль. В `source` включи провайдера/профиль измерения и контекст устройства. Один запрос в одном контексте — одна строка в снимке.
+
+```bash
+python3 <путь-скилла>/references/shared/store_data.py ranks --query 'habit tracker' --package com.example.myapp --locale en-GB --country GB --limit 30 --output reports/after.csv
+```
+
+Collector фиксирует public web context, фактическую глубину и parser version, не персонализированную выдачу устройства. Fixture output помечен `fixture/offline`; не сравнивай его с реальными наблюдениями. Пустой/поврежденный ответ отклоняется.
 
 ```bash
 python3 <путь-скилла>/references/shared/cli.py ranks reports/before.csv reports/after.csv --output reports/rank-changes.json
@@ -28,6 +34,8 @@ python3 <путь-скилла>/references/shared/cli.py ranks reports/before.cs
 Проверь same query set, последовательность timestamps, метод счета результатов и одинаковые условия. В отдельном summary можно показать долю запросов в наблюдаемом диапазоне или число входов/выходов, с неизменным списком и глубиной. Это отчет выборки; CLI не вычисляет share of voice рынка.
 
 Для Console/продуктовых показателей сохрани название поля, numerator/denominator, listing, source, country/language, install state, дату выгрузки и coverage. Click CTR современной отчетности и legacy acquisition conversion не соединяются в один ряд. Сравни одинаковую длину периодов и weekday mix; неполные дни, задержка attribution и suppression отдельно помечаются.
+
+`play_reports.py normalize` сохраняет измерения language/listing/install-state/device/traffic, `summary` группирует их отдельно и считает visitor-days/action-days. Это дневной агрегат, а не deduplicated weekly cohort и не автоматическое воспроизведение Console rate. Подавленные counts остаются неизвестными; overlapping total/segments не складывай.
 
 ## 3. Найди место изменения и проверь альтернативы
 

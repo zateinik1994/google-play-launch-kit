@@ -21,6 +21,45 @@ ADS_FIELDS = ("date", "campaign_id", "currency", "cost", "impressions", "clicks"
 ADS_SCOPE = "https://www.googleapis.com/auth/adwords"
 CONVERSION_RESOURCE = re.compile(r"^customers/[0-9]{10}/conversionActions/[1-9][0-9]*$")
 GOAL = "OPTIMIZE_IN_APP_CONVERSIONS_TARGET_CONVERSION_COST"
+INSTALL_GOAL = "OPTIMIZE_INSTALLS_TARGET_INSTALL_COST"
+
+
+def package_name(value: str) -> str:
+    if not isinstance(value, str) or not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]*(?:\.[A-Za-z][A-Za-z0-9_]*)+", value):
+        raise ValueError("package_name must be an Android application ID.")
+    return value
+
+
+def campaign_filter(package=None, campaign_ids=None) -> str:
+    clause = ""
+    if package is not None:
+        clause += f" AND campaign.app_campaign_setting.app_id = '{package_name(package)}'"
+        clause += " AND campaign.app_campaign_setting.app_store = 'GOOGLE_APP_STORE'"
+    if campaign_ids is not None:
+        if not isinstance(campaign_ids, list) or not campaign_ids or any(
+            not re.fullmatch(r"[1-9][0-9]*", str(value)) for value in campaign_ids
+        ):
+            raise ValueError("Campaign IDs must be a non-empty list of positive integers.")
+        clause += " AND campaign.id IN (" + ", ".join(str(value) for value in campaign_ids) + ")"
+    return clause
+
+
+def keyword_ideas_request(config):
+    if not isinstance(config, dict) or set(config) != {"seeds", "language_resource", "country_resources"}:
+        raise ValueError("Keyword ideas config requires exactly seeds, language_resource and country_resources.")
+    seeds = config["seeds"]
+    if not isinstance(seeds, list) or not 1 <= len(seeds) <= 20 or any(not isinstance(value, str) or not value.strip() for value in seeds):
+        raise ValueError("Keyword ideas need 1–20 non-empty seed keywords.")
+    language = config["language_resource"]
+    countries = config["country_resources"]
+    if not isinstance(language, str) or not re.fullmatch(r"languageConstants/[1-9][0-9]*", language):
+        raise ValueError("Use an actual languageConstants resource.")
+    if not isinstance(countries, list) or not 1 <= len(countries) <= 10 or any(
+        not isinstance(value, str) or not re.fullmatch(r"geoTargetConstants/[1-9][0-9]*", value) for value in countries
+    ) or len(set(countries)) != len(countries):
+        raise ValueError("Use 1–10 unique actual country geoTargetConstants resources.")
+    return {"keywordSeed": {"keywords": seeds}, "language": language, "geoTargetConstants": countries,
+            "keywordPlanNetwork": "GOOGLE_SEARCH", "includeAdultKeywords": False}
 
 
 class AdsError(RuntimeError):
@@ -49,7 +88,7 @@ def customer_id(value: str) -> str:
 
 
 def api_version(value: str) -> str:
-    if not re.fullmatch(r"v[1-9][0-9]*", value or ""):
+    if not isinstance(value, str) or not re.fullmatch(r"v[1-9][0-9]*", value):
         raise ValueError("Pass an explicit API version, e.g. v25; check Google's supported versions.")
     return value
 
@@ -86,7 +125,8 @@ class AdsADCTransport:
     def request(self, method, url, *, payload):
         try:
             response = self.session.request(
-                method, url, json=payload, headers=self.headers, timeout=self.timeout
+                method, url, json=payload, headers=self.headers, timeout=self.timeout,
+                allow_redirects=False,
             )
         except Exception as exc:
             raise AdsError(f"{type(exc).__name__} contacting Google Ads; no automatic retry.") from exc
@@ -115,13 +155,22 @@ def text_length(value: str) -> int:
 def validate_config(config: Any) -> list[str]:
     if not isinstance(config, dict):
         return ["Campaign config must be a JSON object."]
+    goal = config.get("goal", "in-app-action")  # Existing action configs remain compatible.
     required = {
-        "name", "package_name", "currency", "daily_budget_micros", "target_cpa_micros",
-        "conversion_action", "country_resources", "language_resources", "headlines", "descriptions",
+        "name", "package_name", "currency", "daily_budget_micros",
+        "country_resources", "language_resources", "headlines", "descriptions",
         "contains_eu_political_advertising",
     }
-    errors = [f"Missing field: {key}" for key in sorted(required - config.keys())]
-    errors += [f"Unsupported field: {key}" for key in sorted(config.keys() - required)]
+    if goal == "install-volume":
+        required.add("target_cpi_micros")
+    else:
+        required |= {"target_cpa_micros", "conversion_action"}
+    if not isinstance(goal, str) or goal not in {"in-app-action", "install-volume"}:
+        errors = ["goal must be in-app-action or install-volume."]
+    else:
+        errors = []
+    errors += [f"Missing field: {key}" for key in sorted(required - config.keys())]
+    errors += [f"Unsupported field: {key}" for key in sorted(config.keys() - required - {"goal"})]
     if not isinstance(config.get("name"), str) or not config["name"].strip():
         errors.append("name must be non-empty text.")
     if not isinstance(config.get("package_name"), str) or not re.fullmatch(
@@ -130,14 +179,15 @@ def validate_config(config: Any) -> list[str]:
         errors.append("package_name must be an Android application ID.")
     if not re.fullmatch(r"[A-Z]{3}", str(config.get("currency", ""))):
         errors.append("currency must be the Ads account currency, e.g. USD.")
-    for key in ("daily_budget_micros", "target_cpa_micros"):
+    for key in ("daily_budget_micros", "target_cpi_micros" if goal == "install-volume" else "target_cpa_micros"):
         value = config.get(key)
         if not isinstance(value, int) or isinstance(value, bool) or not 0 < value <= 2**63 - 1:
             errors.append(f"{key} must be a positive int64 integer in account currency micros.")
-    try:
-        conversion_resource(config.get("conversion_action"))
-    except ValueError as exc:
-        errors.append(str(exc))
+    if goal != "install-volume":
+        try:
+            conversion_resource(config.get("conversion_action"))
+        except ValueError as exc:
+            errors.append(str(exc))
     for key, prefix in (("country_resources", "geoTargetConstants"), ("language_resources", "languageConstants")):
         values = config.get(key)
         if not isinstance(values, list) or not values or any(
@@ -187,15 +237,18 @@ def campaign_request(customer: str, config: Mapping[str, Any], *, validate_only:
             "advertisingChannelType": "MULTI_CHANNEL",
             "advertisingChannelSubType": "APP_CAMPAIGN",
             "campaignBudget": budget,
-            "targetCpa": {"targetCpaMicros": str(config["target_cpa_micros"])},
+            "targetCpa": {"targetCpaMicros": str(config["target_cpi_micros"] if config.get("goal") == "install-volume" else config["target_cpa_micros"])},
             "appCampaignSetting": {
                 "appId": config["package_name"], "appStore": "GOOGLE_APP_STORE",
-                "biddingStrategyGoalType": GOAL,
+                "biddingStrategyGoalType": INSTALL_GOAL if config.get("goal") == "install-volume" else GOAL,
             },
-            "selectiveOptimization": {"conversionActions": [config["conversion_action"]]},
             "containsEuPoliticalAdvertising": "DOES_NOT_CONTAIN_EU_POLITICAL_ADVERTISING",
         }}},
     ]
+    if config.get("goal") != "install-volume":
+        operations[1]["campaignOperation"]["create"]["selectiveOptimization"] = {
+            "conversionActions": [config["conversion_action"]]
+        }
     for resource in config["country_resources"]:
         operations.append({"campaignCriterionOperation": {"create": {
             "campaign": campaign, "location": {"geoTargetConstant": resource}, "negative": False,
@@ -236,7 +289,7 @@ def date_range(start: str, end: str) -> tuple[str, str]:
     return start, end
 
 
-def report_queries(start: str, end: str, conversion_action: str) -> tuple[str, str]:
+def report_queries(start: str, end: str, conversion_action: str, *, package=None, campaign_ids=None) -> tuple[str, str]:
     start, end = date_range(start, end)
     conversion_resource(conversion_action)
     where = (
@@ -245,6 +298,7 @@ def report_queries(start: str, end: str, conversion_action: str) -> tuple[str, s
         "('APP_CAMPAIGN', 'APP_CAMPAIGN_FOR_ENGAGEMENT', 'APP_CAMPAIGN_FOR_PRE_REGISTRATION')"
         " AND campaign.status IN ('ENABLED', 'PAUSED', 'REMOVED')"
         f" AND segments.date BETWEEN '{start}' AND '{end}'"
+        + campaign_filter(package, campaign_ids)
     )
     cost = (
         "SELECT segments.date, campaign.id, customer.currency_code, metrics.cost_micros, "
@@ -385,14 +439,33 @@ class GoogleAds:
             resources = response.get("mutateOperationResponses")
             if response.get("partialFailureError") or not isinstance(resources, list) or len(resources) != len(request["mutateOperations"]):
                 raise AdsError("Creation response did not confirm all operations.")
-            names = []
-            for resource in resources:
+            names, by_kind = [], {}
+            expected_kinds = {
+                "campaignBudgetOperation": ("campaignBudgetResult", "campaignBudgets", False),
+                "campaignOperation": ("campaignResult", "campaigns", False),
+                "campaignCriterionOperation": ("campaignCriterionResult", "campaignCriteria", True),
+                "adGroupOperation": ("adGroupResult", "adGroups", False),
+                "adGroupAdOperation": ("adGroupAdResult", "adGroupAds", True),
+            }
+            for expected, resource in zip(request["mutateOperations"], resources):
                 if not isinstance(resource, dict) or len(resource) != 1:
                     raise AdsError("Creation response contained an invalid operation result.")
-                detail = next(iter(resource.values()))
-                if not isinstance(detail, dict) or not isinstance(detail.get("resourceName"), str) or not detail["resourceName"]:
-                    raise AdsError("Creation response contained a missing resource name.")
-                names.append(detail["resourceName"])
+                result_kind, kind, compound = expected_kinds[next(iter(expected))]
+                detail = resource.get(result_kind)
+                name = detail.get("resourceName") if isinstance(detail, dict) else None
+                pattern = rf"customers/{self.customer}/{kind}/[1-9][0-9]*" + (r"~[1-9][0-9]*" if compound else "")
+                if not isinstance(name, str) or not re.fullmatch(pattern, name):
+                    raise AdsError("Creation response did not confirm the expected resource type/customer.")
+                names.append(name)
+                by_kind.setdefault(kind, []).append(name)
+            if len(set(names)) != len(names):
+                raise AdsError("Creation response contained duplicate resource names.")
+            campaign_id = by_kind["campaigns"][0].rsplit("/", 1)[-1]
+            group_id = by_kind["adGroups"][0].rsplit("/", 1)[-1]
+            if any(name.rsplit("/", 1)[-1].split("~")[0] != campaign_id for name in by_kind.get("campaignCriteria", [])) or any(
+                name.rsplit("/", 1)[-1].split("~")[0] != group_id for name in by_kind.get("adGroupAds", [])
+            ):
+                raise AdsError("Creation response did not confirm the requested parent relationships.")
         except AdsError as exc:
             if not isinstance(exc, AdsAPIError) or exc.status == 408 or exc.status >= 500:
                 raise AdsCreationUnknown(
@@ -405,9 +478,116 @@ class GoogleAds:
             "campaignStatus": "PAUSED", "resources": names,
         }
 
-    def report(self, start: str, end: str, conversion_action: str) -> list[dict[str, str]]:
-        cost, conversions = report_queries(start, end, conversion_action)
+    def report(self, start: str, end: str, conversion_action: str, *, package=None, campaign_ids=None) -> list[dict[str, str]]:
+        cost, conversions = report_queries(start, end, conversion_action, package=package, campaign_ids=campaign_ids)
         return normalize_report(self.search(cost), self.search(conversions), conversion_action)
+
+    def keyword_ideas(self, config):
+        request = keyword_ideas_request(config)
+        names = ", ".join("'" + value + "'" for value in config["country_resources"])
+        rows = self.search("SELECT geo_target_constant.resource_name, geo_target_constant.target_type, "
+                           "geo_target_constant.status FROM geo_target_constant WHERE geo_target_constant.resource_name IN (" + names + ")")
+        verified = set()
+        for row in rows:
+            geo = row.get("geoTargetConstant", {})
+            if geo.get("targetType") != "Country" or geo.get("status") != "ENABLED":
+                raise AdsError("Keyword ideas require enabled country geo targets.")
+            verified.add(geo.get("resourceName"))
+        if verified != set(config["country_resources"]):
+            raise AdsError("Could not verify keyword ideas countries.")
+        languages = self.search("SELECT language_constant.resource_name FROM language_constant "
+                                f"WHERE language_constant.resource_name = '{config['language_resource']}'")
+        if len(languages) != 1 or languages[0].get("languageConstant", {}).get("resourceName") != config["language_resource"]:
+            raise AdsError("Could not verify keyword ideas language.")
+        account = self.account()
+        results, token, seen = [], None, set()
+        endpoint = f"https://googleads.googleapis.com/{self.version}/customers/{self.customer}:generateKeywordIdeas"
+        while True:
+            payload = dict(request)
+            if token:
+                payload["pageToken"] = token
+            response = self.transport.request("POST", endpoint, payload=payload)
+            rows = response.get("results", [])
+            if not isinstance(rows, list) or any(not isinstance(row, dict) for row in rows):
+                raise AdsError("Invalid keyword ideas result.")
+            results.extend(rows)
+            token = response.get("nextPageToken")
+            if not token:
+                break
+            if not isinstance(token, str) or token in seen:
+                raise AdsError("Invalid or repeated keyword ideas pagination token.")
+            seen.add(token)
+        return {"source": "Google Ads Keyword Planner — Google Search", "surface": "GOOGLE_SEARCH",
+                "isGooglePlayPopularity": False, "customer": self.customer, "apiVersion": self.version,
+                "fetchedAt": datetime.now(timezone.utc).isoformat(), "account": account, "request": request,
+                "results": results, "notes": ["Historical Search estimates; not Google Play query volume, ranks or ASA popularity.",
+                                             "Close variants may be grouped; missing metrics mean unknown, not zero.",
+                                             "Bid metrics use account currency micros; request does not create a campaign or spend budget."]}
+
+    def account(self) -> dict[str, Any]:
+        rows = self.search("SELECT customer.id, customer.currency_code, customer.time_zone, "
+                           "customer.conversion_tracking_setting.google_ads_conversion_customer FROM customer LIMIT 1")
+        if len(rows) != 1 or not isinstance(rows[0].get("customer"), dict):
+            raise AdsError("Could not read Google Ads account metadata.")
+        account = rows[0]["customer"]
+        if not isinstance(account.get("timeZone"), str) or not account["timeZone"] or not re.fullmatch(r"[A-Z]{3}", str(account.get("currencyCode", ""))):
+            raise AdsError("Account metadata did not contain currency/timezone.")
+        return account
+
+    def report_metadata(self, start, end, action, *, package=None, campaign_ids=None):
+        account = self.account()
+        owner = conversion_resource(action).split("/")[1]
+        action_client = self if owner == self.customer else GoogleAds(owner, self.version, self.transport)
+        actions = action_client.search(
+            "SELECT conversion_action.resource_name, conversion_action.name, conversion_action.type, "
+            "conversion_action.status, conversion_action.primary_for_goal, conversion_action.counting_type, "
+            "conversion_action.click_through_lookback_window_days, conversion_action.view_through_lookback_window_days "
+            f"FROM conversion_action WHERE conversion_action.resource_name = '{action}'"
+        )
+        return {
+            "source": "Google Ads API", "customer": self.customer, "apiVersion": self.version,
+            "fetchedAt": datetime.now(timezone.utc).isoformat(), "account": account,
+            "startDate": start, "endDate": end, "inclusiveDates": True,
+            "package": package, "campaignIds": campaign_ids, "conversionAction": action,
+            "conversionSettings": actions, "conversionSettingsVerified": len(actions) == 1,
+            "metric": "metrics.conversions",
+            "attributionDate": "advertising interaction date; not conversion date",
+            "notes": ["Conversion attribution can be fractional and delayed.",
+                      "Spend is complete campaign delivery; do not sum spend across action reports."],
+        }
+
+    def dimension_report(self, dimension, start, end, action, *, package=None, campaign_ids=None):
+        queries = dimension_queries(dimension, start, end, action, package=package, campaign_ids=campaign_ids)
+        delivery, conversions = (self.search(query) for query in queries)
+        return {"dimension": dimension, "metadata": self.report_metadata(start, end, action, package=package, campaign_ids=campaign_ids),
+                "deliveryRows": delivery, "conversionRows": conversions,
+                "aggregationWarning": "Asset link rows overlap; never sum them as incremental campaign spend." if dimension == "asset" else
+                                      "Country rows include geographic location type (presence/interest); keep types separate."}
+
+
+def dimension_queries(dimension, start, end, action, *, package=None, campaign_ids=None):
+    date_range(start, end)
+    conversion_resource(action)
+    if dimension == "geo":
+        source = "geographic_view"
+        fields = "geographic_view.resource_name, geographic_view.country_criterion_id, geographic_view.location_type"
+    elif dimension == "asset":
+        source = "ad_group_ad_asset_view"
+        fields = ("ad_group_ad_asset_view.resource_name, ad_group_ad_asset_view.asset, "
+                  "ad_group_ad_asset_view.ad_group_ad, ad_group_ad_asset_view.enabled, "
+                  "ad_group_ad_asset_view.field_type, ad_group_ad_asset_view.performance_label, "
+                  "asset.resource_name, asset.name, asset.type, asset.text_asset.text, "
+                  "asset.youtube_video_asset.youtube_video_id")
+    else:
+        raise ValueError("Report dimension must be geo or asset.")
+    common = "segments.date, campaign.id, customer.currency_code, " + fields
+    where = (f" FROM {source} WHERE campaign.advertising_channel_type = 'MULTI_CHANNEL'"
+             " AND campaign.advertising_channel_sub_type IN ('APP_CAMPAIGN', 'APP_CAMPAIGN_FOR_ENGAGEMENT', 'APP_CAMPAIGN_FOR_PRE_REGISTRATION')"
+             f" AND segments.date BETWEEN '{start}' AND '{end}'" + campaign_filter(package, campaign_ids))
+    return (
+        "SELECT " + common + ", metrics.cost_micros, metrics.impressions, metrics.clicks" + where,
+        "SELECT " + common + ", segments.conversion_action, metrics.conversions" + where + f" AND segments.conversion_action = '{action}'",
+    )
 
 
 def read_config(path: str | Path):
@@ -426,17 +606,21 @@ def write_report(path: Path, rows) -> None:
 def _parser():
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
-    for name in ("plan", "validate", "create", "report"):
+    for name in ("plan", "validate", "create", "report", "geo-report", "asset-report", "keyword-ideas"):
         command = commands.add_parser(name)
         command.add_argument("--customer", required=True)
         command.add_argument("--api-version", required=True, help="Explicit supported version, e.g. v25")
-        if name == "report":
+        if name in ("report", "geo-report", "asset-report"):
             command.add_argument("--start-date", required=True)
             command.add_argument("--end-date", required=True)
             command.add_argument("--conversion-action", required=True)
             command.add_argument("--output", help="New CSV file; defaults to outputs/<unique>.csv")
+            command.add_argument("--package", help="Filter to this Android application ID")
+            command.add_argument("--campaign-id", action="append", help="Repeat for selected campaign IDs")
         else:
             command.add_argument("--config", required=True)
+        if name == "keyword-ideas":
+            command.add_argument("--output", required=True)
         if name in ("validate", "create"):
             command.add_argument("--live", action="store_true", help="Contact Ads; create remains PAUSED")
         if name == "create":
@@ -449,8 +633,22 @@ def main(argv: list[str] | None = None) -> int:
     try:
         customer, version = customer_id(args.customer), api_version(args.api_version)
         config = None
-        if args.command == "report":
-            report_queries(args.start_date, args.end_date, args.conversion_action)
+        if args.command == "keyword-ideas":
+            config = read_config(args.config)
+            keyword_ideas_request(config)  # Bad input must not load ADC.
+            output = Path(args.output)
+            if output.exists():
+                raise FileExistsError(str(output))
+            client = GoogleAds(customer, version, AdsADCTransport())
+            result = client.keyword_ideas(config)
+            output.parent.mkdir(parents=True, exist_ok=True)
+            with output.open("x", encoding="utf-8") as handle:
+                json.dump(result, handle, ensure_ascii=False, indent=2)
+                handle.write("\n")
+            print(json.dumps({"status": "exported", "source": result["source"], "output": str(output), "ideas": len(result["results"])}))
+            return 0
+        if args.command in ("report", "geo-report", "asset-report"):
+            report_queries(args.start_date, args.end_date, args.conversion_action, package=args.package, campaign_ids=args.campaign_id)
         else:
             config = read_config(args.config)
             request = campaign_request(customer, config)
@@ -460,13 +658,29 @@ def main(argv: list[str] | None = None) -> int:
                     "currency": config["currency"], "request": request,
                 }, ensure_ascii=False, indent=2))
                 return 0
-        client = GoogleAds(customer, version, AdsADCTransport())
         stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ") + "-" + secrets.token_hex(4)
+        if args.command in ("report", "geo-report", "asset-report"):
+            default_name = f"google-ads-report-{stamp}.csv" if args.command == "report" else f"google-ads-{args.command.split('-', 1)[0]}-{stamp}.json"
+            output = Path(args.output) if args.output else Path("outputs") / default_name
+            sidecar = output.with_suffix(output.suffix + ".metadata.json") if args.command == "report" else None
+            if output.exists() or sidecar is not None and sidecar.exists():
+                raise FileExistsError("Report or metadata file already exists; no API request made.")
+            output.parent.mkdir(parents=True, exist_ok=True)
+        client = GoogleAds(customer, version, AdsADCTransport())
         if args.command == "report":
-            rows = client.report(args.start_date, args.end_date, args.conversion_action)
-            output = Path(args.output) if args.output else Path("outputs") / f"google-ads-report-{stamp}.csv"
+            rows = client.report(args.start_date, args.end_date, args.conversion_action, package=args.package, campaign_ids=args.campaign_id)
+            metadata = client.report_metadata(args.start_date, args.end_date, args.conversion_action, package=args.package, campaign_ids=args.campaign_id)
             write_report(output, rows)
-            result = {"status": "exported", "output": str(output), "rows": len(rows)}
+            with sidecar.open("x", encoding="utf-8") as handle:
+                json.dump(metadata, handle, ensure_ascii=False, indent=2)
+            result = {"status": "exported", "output": str(output), "metadata": str(sidecar), "rows": len(rows)}
+        elif args.command in ("geo-report", "asset-report"):
+            dimension = args.command.split("-", 1)[0]
+            report = client.dimension_report(dimension, args.start_date, args.end_date, args.conversion_action,
+                                             package=args.package, campaign_ids=args.campaign_id)
+            with output.open("x", encoding="utf-8") as handle:
+                json.dump(report, handle, ensure_ascii=False, indent=2)
+            result = {"status": "exported", "output": str(output), "dimension": dimension}
         elif args.command == "validate":
             result = client.validate(config)
         else:

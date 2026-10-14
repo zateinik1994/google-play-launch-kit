@@ -13,7 +13,7 @@ ROOT = Path(__file__).resolve().parent.parent
 
 def runtime_status():
     available = {}
-    for module in ("google.auth", "requests"):
+    for module in ("google.auth", "requests", "google_play_scraper"):
         try:
             available[module] = importlib.util.find_spec(module) is not None
         except (ImportError, ModuleNotFoundError, ValueError):
@@ -22,7 +22,8 @@ def runtime_status():
         "interpreter": sys.executable,
         "version": ".".join(map(str, sys.version_info[:3])),
         "supported": sys.version_info[:2] >= (3, 11),
-        "network_dependencies": all(available.values()),
+        "network_dependencies": available["google.auth"] and available["requests"],
+        "collection_dependencies": available["google_play_scraper"],
     }
 
 
@@ -48,9 +49,10 @@ def main(argv=None):
     if args.check:
         runtime = runtime_status()
         print(f"Python: {runtime['interpreter']} ({runtime['version']}) — {'supported' if runtime['supported'] else 'requires 3.11+'}")
-        print("Network dependencies: " + ("available" if runtime["network_dependencies"] else "missing (optional for offline tools)"))
+        print("Google API dependencies: " + ("available" if runtime["network_dependencies"] else "missing (optional for offline tools)"))
         if not runtime["network_dependencies"]:
-            print("For network commands, install requirements.txt with this interpreter in your chosen environment.")
+            print("For Google API commands, install requirements.txt with this interpreter in your chosen environment.")
+        print("Public collection dependency: " + ("available" if runtime["collection_dependencies"] else "missing (optional; install requirements-collection.txt)"))
         for skill in skills:
             target = destination/skill.name
             state = "not installed"

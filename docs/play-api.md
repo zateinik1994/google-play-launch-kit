@@ -2,11 +2,11 @@
 
 `shared/play_api.py` работает с официальным Android Publisher API v3. Он читает и экспортирует локализованные тексты основного store listing, проверяет локальный JSON и применяет изменения названия, краткого и полного описания, ссылки на YouTube. Ограничения полей и редакторские рекомендации находятся в [knowledge/play-metadata.md](../knowledge/play-metadata.md).
 
-Этот клиент не загружает AAB, скриншоты, иконки или feature graphic, не меняет release tracks, Data safety и custom store listings, не создает рекламу Google Ads. У Google есть отдельные ресурсы для части этих операций; в данном CLI они не реализованы.
+Текстовый CLI `shared/play_api.py` работает только с main listing. Для AAB, графики, контактов и release tracks реализован отдельный `shared/play_release.py`, описанный ниже. Data safety, custom listings и реклама относятся к другим поверхностям; не подставляйте их поля в Listing JSON.
 
 ## Подготовка доступа
 
-Для offline-команд достаточно Python 3.10+. Для сетевых команд установите дополнительную зависимость:
+Для набора используйте Python 3.11+. Для сетевых команд установите дополнительную зависимость:
 
 ```bash
 python3 -m pip install "google-auth[requests]>=2"
@@ -120,3 +120,139 @@ python3 -m unittest discover -s tests -p 'test_play_api.py' -v
 Тесты используют фейковый transport и проверяют порядок операций, сохранение видео и резервной копии, отсутствие commit при ошибке validate, очистку edit и неопределенный исход commit. Они не обращаются к Google. Live-публикация на реальном аккаунте не проверялась.
 
 Официальные страницы проверены 14 октября 2026 года. При смене API сверяйте поведение методов и права доступа с актуальной документацией Google.
+
+## Assets, AAB, контакты и release tracks
+
+`shared/play_release.py` выполняет несколько операций **в одном edit**. Доступ и scope те же, что выше. В клоне запускайте `python3 -m shared.play_release`, в установленном скилле — `python3 <skill-directory>/references/shared/play_release.py`.
+
+```bash
+python3 -m shared.play_release plan --config examples/data/play-release.example.json
+python3 -m shared.play_release snapshot --package com.example.app --live --output before.json
+python3 -m shared.play_release plan --config release.json --current before.json
+python3 -m shared.play_release validate --config release.json --live --backup-directory outputs/validation-01
+python3 -m shared.play_release apply --config release.json --live --backup-directory outputs/release-01
+```
+
+`plan` всегда offline. `validate`, `apply` и `snapshot` без `--live` также не загружают credentials и не обращаются к Google. `validate --live` выполняет uploads/изменения внутри временного edit, серверный validate и удаление edit **без commit**. Это реальная серверная проверка артефактов, не read-only вызов; она не означает policy approval. `apply --live` после успешного validate делает commit с `ERROR_IF_IN_REVIEW`. Snapshot создает временный edit, читает listings/details/bundles/tracks/image metadata и удаляет edit; он имеет ту же оговорку о concurrent edits.
+
+Для ограниченного чтения images:
+
+```bash
+python3 -m shared.play_release snapshot --package com.example.app --language en-US --image-type phoneScreenshots --live --output phone-before.json
+```
+
+Без фильтра snapshot получает все 8 официальных AppImageType для существующих локалей. URL в snapshot — серверный preview, а не локальный бинарный backup. Live apply отдельно сохраняет оригинальные изображения перед изменением.
+
+### Конфигурация
+
+[Вымышленный пример](../examples/data/play-release.example.json) проходит offline plan, но требует собственного package и реально доступных versionCodes для live. Относительные пути файлов отсчитываются от папки JSON-конфига. Поддержаны:
+
+| Поле | Операция |
+| --- | --- |
+| `package_name` | Обязательное приложение |
+| `listings` | Locale map основного листинга, тот же контракт текста |
+| `delete_listings` | Явный список удаляемых локалей; assets каждой локали резервируются |
+| `details` | PATCH `contactEmail`, `contactWebsite`, `contactPhone`, `defaultLanguage`; отсутствующие поля сохраняются |
+| `images` | Явные append/replace/delete/reorder по language/image_type |
+| `bundle` | `file` AAB и optional `expected_version_code` |
+| `tracks` | Exact API track IDs и полный желаемый список `releases` |
+| `changes_not_sent_for_review` | Explicit boolean с семантикой commit API, не универсальный draft mode |
+
+App details — публичные контакты, не privacy policy/Data safety. Источник: [AppDetails](https://developers.google.com/android-publisher/api-ref/rest/v3/edits.details).
+
+### Images: upload, replace, delete и порядок
+
+Ключи image type совпадают с [AppImageType](https://developers.google.com/android-publisher/api-ref/rest/v3/AppImageType): `icon`, `featureGraphic`, `phoneScreenshots`, `sevenInchScreenshots`, `tenInchScreenshots`, `tvScreenshots`, `tvBanner`, `wearScreenshots`. Пример фрагмента `images`:
+
+```json
+[
+  {"language":"en-US","image_type":"phoneScreenshots","operation":"replace","files":["screenshots/01.png","screenshots/02.png"]},
+  {"language":"en-US","image_type":"featureGraphic","operation":"append","files":["screenshots/feature.png"]}
+]
+```
+
+`append` добавляет файлы; `replace` удаляет группу и загружает новые файлы последовательно в указанном порядке. `delete` с `ids:["image-id"]` удаляет выбранные изображения, с `all:true` — всю группу. `reorder` с `ids:["second-id","first-id"]` требует **каждый текущий ID ровно один раз**, резервирует оригиналы, удаляет группу и повторно загружает их в этом порядке. Новые IDs могут отличаться. Это композиция реальных [list/upload/delete/deleteall](https://developers.google.com/android-publisher/api-ref/rest/v3/edits.images), а не отдельный выдуманный reorder endpoint. После commit проверь порядок в Console и магазине.
+
+В одной конфигурации допускается одна операция на language/type. Для upload нужен существующий listing этой локали или `listings` в том же config: текст записывается первым. Клиент проверяет вместимость группы (один icon/feature/banner, до восьми screenshots). Canonical [image validator](../shared/image_validation.py) проверяет размеры/формат phone, 7/10-inch tablet, icon и feature; остальные form factors проходят проверку файла, затем серверные ограничения и отдельный visual/policy review. Tablet profile использует 1080–7680 px и 9:16/16:9; это не способ превратить phone capture в tablet UI. JPEG scan data не декодируется полностью. Число нужных кадров и содержание не подтверждаются успешным API upload.
+
+### AAB и версии
+
+```json
+{"file":"build/app-release.aab","expected_version_code":42}
+```
+
+Локально проверяются наличие файла, ZIP container, `BundleConfig.pb` и base manifest; локальный предел размера 2 GiB является ограничением этого клиента. Package, signing, SDK requirements и актуальную пригодность артефакта подтверждает сервер/Console. AAB передается через официальный [bundles.upload](https://developers.google.com/android-publisher/api-ref/rest/v3/edits.bundles/upload), resumable session init и потоковый PUT с увеличенным timeout по [media protocol](https://developers.google.com/android-publisher/upload). Session Location проверяется перед передачей credentials/media и не сохраняется в публичном receipt. Автоматических повторов upload нет.
+
+Из ответа берется настоящий integer `versionCode`; при несовпадении с expected edit не коммитится. В `tracks[].releases[].versionCodes` строка `"$uploaded"` заменяется этим ответом; без `bundle` она недопустима. Клиент не угадывает versionCode из имени файла. SHA-256 локальных файлов проверяется при планировании и перед загрузкой, чтобы не отправить изменившийся артефакт.
+
+### Tracks, notes и rollout
+
+```json
+[
+  {"track":"production","releases":[{
+    "name":"42 gradual rollout",
+    "versionCodes":["$uploaded"],
+    "status":"inProgress",
+    "userFraction":0.05,
+    "releaseNotes":[{"language":"en-US","text":"Improved daily checklist."}]
+  }]}
+]
+```
+
+Используйте track ID из snapshot: `internal`, `production`, `alpha`/`beta` или конкретное имя существующего closed/form-factor track. Клиент не переименовывает «closed» в произвольный ID и не создает track/tester lists. `draft` не обслуживает пользователей; `completed` запрашивает полный выпуск; `inProgress` требует 0 < userFraction < 1; `halted` позволяет остановить дальнейшее обслуживание staged release. Полный массив включает версии, которые надо сохранить; пустой releases явно очищает track. Для `countryTargeting` поддержан production/inProgress; priority — 0..5. Источник схемы и статусов: [Track/Release](https://developers.google.com/android-publisher/api-ref/rest/v3/edits.tracks).
+
+Release notes — уникальные language/text, максимум 500 Unicode code points на язык по [release guide](https://support.google.com/googleplay/android-developer/answer/9859348?hl=en). Locale syntax проверяется локально; поддержка и актуальные требования — сервером. Код не обходит production access/testing gate, review, country availability и managed publishing. Commit со статусом completed не доказывает, что выпуск уже виден пользователям.
+
+### Backups, восстановление и неизвестный исход
+
+Перед **первой** загрузкой/PUT/PATCH/DELETE создается новая backup directory. Она содержит:
+
+- `snapshot.json`: listings, details, текущие tracks/bundle metadata и IDs/URL/hash затронутых image groups.
+- Оригинальные бинарные изображения + `assets.json` с путем и проверенным SHA-256.
+- `rollback.json`: готовый config восстановления затронутых текстов/контактов/groups/tracks; добавленные локали удаляются явно.
+- `transaction.json`: durable состояние staging/commit-pending/committed/validated-only либо staging-failed/commit-rejected/commit-outcome-unknown.
+- `result.json` при подтвержденном результате.
+
+Backup изображения скачивается без Publisher bearer token с разрешенных Google image hosts; SHA-256 или SHA-1 из API сравнивается с оригиналом. Если URL возвращает scaled preview, клиент пробует original-size variant и снова проверяет hash. При отсутствии checksum, недоступном файле или несовпадении **запись прекращается до destructive операций**. Existing backup directory не перезаписывается. Восстановление проходит тот же план/validate/apply:
+
+```bash
+python3 -m shared.play_release plan --config outputs/release-01/rollback.json
+python3 -m shared.play_release validate --config outputs/release-01/rollback.json --live --backup-directory outputs/restore-validation
+python3 -m shared.play_release apply --config outputs/release-01/rollback.json --live --backup-directory outputs/restore-01
+```
+
+Rollback является новым изменением, требует соответствующего поручения и принимается сервером заново. Он не отменяет установку более новой версии на устройствах и не гарантирует возможность downgrade. Старые AAB представлены существующими versionCodes; Publisher не дает этому клиенту скачать исходный ранее загруженный AAB. Храните свои подписанные build artifacts отдельно.
+
+Ошибка до commit удаляет edit; это не undo подтвержденного commit. Staging/pending receipt после прерывания не доказывает публикацию. При timeout/408/5xx или malformed commit result фиксируется неизвестный исход и автоматического повтора нет: сначала проверь Console/track/listing. Если после подтвержденного успеха receipt не удалось сохранить, результат выводится с `receipt_error`; повторять commit нельзя.
+
+### Публичные API и границы
+
+Сверено **2026-10-14** с [Android Publisher REST index](https://developers.google.com/android-publisher/api-ref/rest). Main listing, images, app contacts, bundle uploads и track releases автоматизированы выше. Для Data safety существует отдельный реальный `applications.dataSafety`, реализованный в `shared/play_safety.py` ниже. Для custom store listing targeting, Store listing experiments и прочих Console-specific анкет не подставляются неподтвержденные endpoints. Эти операции выполняются через доступную Console integration или UI в рамках поручения; способность загрузить release не заменяет заполнение declarations.
+
+```bash
+python3 -m unittest discover -s tests -p 'test_play_release.py' -v
+```
+
+Mocked tests проверяют media endpoints/session protocol, backup-before-write, hash gating, explicit image operations/order, actual versionCode binding, notes/rollout validation, track retention payload, remote validate без commit, persistent unknown outcome и offline defaults. Live-проверка с реальным аккаунтом не выполнялась.
+
+## Data safety: отдельный официальный POST
+
+`shared/play_safety.py` реализует [applications.dataSafety](https://developers.google.com/android-publisher/api-ref/rest/v3/applications/dataSafety): POST `/applications/{packageName}/dataSafety` с JSON `{"safetyLabels":"содержимое CSV"}`. Ответ успешной записи пустой. Метод находится **вне edit**, не имеет declaration GET или validateOnly и не участвует в backup/commit release-транзакции.
+
+```bash
+python3 -m shared.play_safety plan --package com.example.app --csv data-safety.csv
+python3 -m shared.play_safety apply --package com.example.app --csv data-safety.csv
+python3 -m shared.play_safety apply --package com.example.app --csv data-safety.csv --before-csv before-data-safety.csv --backup-directory outputs/safety-01 --live
+```
+
+Первые две команды offline. Для live необходим **предоставленный свежий before CSV из Console**: официальный метод не позволяет автоматически прочитать текущее declaration. Клиент сохраняет before/proposed CSV и durable receipt до POST; одинаковые исходные файлы не отправляются повторно. Каждая запись — отдельное внешнее изменение в пределах поручения пользователя; отсутствие edit означает отсутствие transactional undo.
+
+Формат проверен на публичном CSV sample из [официальной Data safety справки](https://support.google.com/googleplay/android-developer/answer/10787469?hl=en) 14 октября 2026. Фактические headers: `Question ID (machine readable)`, **`Response ID (machine readable)`**, `Response value`, `Answer requirement`, `Human-friendly question label`. Принимается UTF-8/BOM, TRUE/FALSE/blank; проверяются CSV shape, уникальность question/response, обязательные ответы и максимум один TRUE для SINGLE_CHOICE. IDs из текущего шаблона передаются как есть, не генерируются из кода приложения. Conditional полноту, наличие всех SDK/data flows и правильность заявления подтверждает аудит продукта/Console, а не синтаксический validator. Public sample содержит демонстрационные ответы и не является declaration приложения пользователя.
+
+Receipt состояния: submission-pending, submitted, submission-rejected или submission-outcome-unknown. Timeout/408/5xx/неожиданный ответ не повторяются автоматически; сначала проверь Console. `submitted` означает acceptance API, не одобрение policy или появление labels. Восстановление выполняется новой явной записью сохраненного before CSV с новым prior export/backup, если входит в поручение.
+
+```bash
+python3 -m unittest discover -s tests -p 'test_play_safety.py' -v
+```
+
+Из установленного скилла используется `python3 <skill-directory>/references/shared/play_safety.py`. Credentials — те же ADC/scope androidpublisher, без сохранения секретов в файлы.

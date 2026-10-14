@@ -12,8 +12,8 @@ from pathlib import Path
 from unittest.mock import patch
 
 from shared.google_ads import (
-    ADS_FIELDS, GOAL, AdsAPIError, AdsError, GoogleAds, campaign_request,
-    customer_id, main, normalize_report, report_queries, validate_config, write_report,
+    ADS_FIELDS, GOAL, INSTALL_GOAL, AdsADCTransport, AdsAPIError, AdsError, GoogleAds, campaign_request,
+    customer_id, main, normalize_report, report_queries, dimension_queries, keyword_ideas_request, validate_config, write_report,
 )
 
 
@@ -65,11 +65,64 @@ class FakeAdsTransport:
         for number, operation in enumerate(payload["mutateOperations"], 1):
             key = next(iter(operation))
             result, kind = mapping[key]
-            responses.append({result: {"resourceName": f"customers/{CUSTOMER}/{kind}/{number}"}})
+            identifier = f"2~{number}" if kind == "campaignCriteria" else f"{len(payload['mutateOperations']) - 1}~{number}" if kind == "adGroupAds" else str(number)
+            responses.append({result: {"resourceName": f"customers/{CUSTOMER}/{kind}/{identifier}"}})
         return {"mutateOperationResponses": responses}
 
 
 class CampaignTests(unittest.TestCase):
+    def test_creation_response_rejects_wrong_customer_type_and_parent_as_unknown(self):
+        transformations = (
+            lambda responses: responses[0]["campaignBudgetResult"].update(resourceName="customers/9999999999/campaignBudgets/1"),
+            lambda responses: responses[1].update(adGroupResult=responses[1].pop("campaignResult")),
+            lambda responses: responses[-1]["adGroupAdResult"].update(resourceName=f"customers/{CUSTOMER}/adGroupAds/999~6"),
+        )
+        for transform in transformations:
+            fake = FakeAdsTransport()
+            original = fake.request
+            def request(method, url, *, payload):
+                result = original(method, url, payload=payload)
+                if url.endswith(":mutate") and payload.get("validateOnly") is False:
+                    transform(result["mutateOperationResponses"])
+                return result
+            fake.request = request
+            from shared.google_ads import AdsCreationUnknown
+            with self.subTest(transform=transform), self.assertRaises(AdsCreationUnknown):
+                GoogleAds(CUSTOMER, "v25", fake).create_paused(CONFIG)
+            self.assertEqual(sum(call[1].endswith(":mutate") and call[2].get("validateOnly") is False for call in fake.calls), 1)
+
+    def test_authenticated_transport_rejects_redirect_without_forwarding_tokens(self):
+        from types import SimpleNamespace
+        calls = []
+        def request(method, url, **kwargs):
+            calls.append((method, url, kwargs))
+            self.assertFalse(kwargs.get("allow_redirects", True))
+            return SimpleNamespace(status_code=302, content=b"", headers={"Location": "https://outside.example/"})
+        transport = AdsADCTransport.__new__(AdsADCTransport)
+        transport.session = SimpleNamespace(request=request)
+        transport.timeout = 1
+        transport.headers = {"developer-token": "fixture-token", "login-customer-id": CUSTOMER}
+        with self.assertRaises(AdsAPIError) as failure:
+            transport.request("POST", "https://googleads.googleapis.com/v25/customers/1234567890/googleAds:mutate", payload={"validateOnly": True})
+        self.assertEqual(failure.exception.status, 302)
+        self.assertEqual(len(calls), 1)
+        self.assertNotIn("fixture-token", str(failure.exception))
+
+    def test_install_volume_is_a_distinct_explicit_goal(self):
+        config = dict(CONFIG, goal="install-volume", target_cpi_micros=1500000)
+        del config["target_cpa_micros"]
+        del config["conversion_action"]
+        campaign = campaign_request(CUSTOMER, config)["mutateOperations"][1]["campaignOperation"]["create"]
+        self.assertEqual(campaign["appCampaignSetting"]["biddingStrategyGoalType"], INSTALL_GOAL)
+        self.assertEqual(campaign["targetCpa"], {"targetCpaMicros": "1500000"})
+        self.assertNotIn("selectiveOptimization", campaign)
+        self.assertEqual(campaign["status"], "PAUSED")
+
+    def test_goal_cost_fields_cannot_be_silently_reinterpreted(self):
+        for goal in ("install-volume", "tROAS", [], None):
+            with self.subTest(goal=goal):
+                self.assertTrue(validate_config(dict(CONFIG, goal=goal)))
+
     def test_schema_uses_in_app_action_goal_and_real_ads_operations(self):
         request = campaign_request(CUSTOMER, CONFIG)
         self.assertTrue(request["validateOnly"])
@@ -195,6 +248,26 @@ def row(day="2026-10-01", campaign="77", *, cost="1234567", impressions="100", c
 
 
 class ReportTests(unittest.TestCase):
+    def test_app_and_campaign_filters_apply_to_both_queries(self):
+        queries = report_queries("2026-10-01", "2026-10-10", ACTION, package="com.example.focus", campaign_ids=["77"])
+        for query in queries:
+            self.assertIn("campaign.app_campaign_setting.app_id = 'com.example.focus'", query)
+            self.assertIn("campaign.id IN (77)", query)
+            self.assertIn("GOOGLE_APP_STORE", query)
+        for package, ids in (("x' OR 1=1", None), (None, ["7) OR 1=1"]), (None, [])):
+            with self.assertRaises(ValueError):
+                report_queries("2026-10-01", "2026-10-10", ACTION, package=package, campaign_ids=ids)
+
+    def test_geo_and_asset_use_separate_delivery_and_action_queries(self):
+        for dimension, source in (("geo", "geographic_view"), ("asset", "ad_group_ad_asset_view")):
+            delivery, conversions = dimension_queries(dimension, "2026-10-01", "2026-10-10", ACTION, package="com.example.focus")
+            self.assertIn(" FROM " + source, delivery)
+            self.assertNotIn("segments.conversion_action", delivery)
+            self.assertNotIn("metrics.cost_micros", conversions)
+            self.assertIn("segments.conversion_action", conversions)
+            self.assertIn("com.example.focus", conversions)
+        self.assertIn("geographic_view.location_type", dimension_queries("geo", "2026-10-01", "2026-10-10", ACTION)[0])
+
     def test_spend_and_conversions_are_queried_separately(self):
         cost, conversions = report_queries("2026-10-01", "2026-10-10", ACTION)
         self.assertNotIn("conversion_action", cost)
@@ -289,6 +362,109 @@ class ReportTests(unittest.TestCase):
 
 
 class CLITests(unittest.TestCase):
+    def test_existing_report_destination_blocks_before_credentials_or_api(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "existing.json"
+            output.write_text("existing")
+            for command in ("report", "geo-report", "asset-report"):
+                args = [command, "--customer", CUSTOMER, "--api-version", "v25",
+                        "--start-date", "2026-10-01", "--end-date", "2026-10-10",
+                        "--conversion-action", ACTION, "--output", str(output)]
+                with self.subTest(command=command), patch("shared.google_ads.AdsADCTransport", side_effect=AssertionError("No ADC or API before preflight")), contextlib.redirect_stderr(io.StringIO()):
+                    self.assertEqual(main(args), 2)
+            csv_output = Path(directory) / "new.csv"
+            csv_output.with_suffix(".csv.metadata.json").write_text("existing")
+            with patch("shared.google_ads.AdsADCTransport", side_effect=AssertionError("No ADC")), contextlib.redirect_stderr(io.StringIO()):
+                self.assertEqual(main(["report", "--customer", CUSTOMER, "--api-version", "v25",
+                                       "--start-date", "2026-10-01", "--end-date", "2026-10-10",
+                                       "--conversion-action", ACTION, "--output", str(csv_output)]), 2)
+
+    def test_keyword_ideas_preserve_search_source_and_pagination(self):
+        config = {"seeds": ["focus timer"], "language_resource": "languageConstants/1000", "country_resources": ["geoTargetConstants/2840"]}
+        class Planner:
+            def __init__(self):
+                self.calls = []
+            def request(self, method, url, *, payload):
+                self.calls.append((url, copy.deepcopy(payload)))
+                if url.endswith(":search"):
+                    if "FROM geo_target_constant" in payload["query"]:
+                        return {"results": [{"geoTargetConstant": {"resourceName": "geoTargetConstants/2840", "status": "ENABLED", "targetType": "Country"}}]}
+                    if "FROM language_constant" in payload["query"]:
+                        return {"results": [{"languageConstant": {"resourceName": "languageConstants/1000"}}]}
+                    return {"results": [{"customer": {"currencyCode": "USD", "timeZone": "UTC"}}]}
+                if not url.endswith(f"customers/{CUSTOMER}:generateKeywordIdeas"):
+                    raise AssertionError(url)
+                if payload.get("pageToken"):
+                    return {"results": [{"text": "pomodoro timer", "keywordIdeaMetrics": {"avgMonthlySearches": "1000"}}]}
+                return {"results": [{"text": "focus timer"}], "nextPageToken": "next"}
+        planner = Planner()
+        result = GoogleAds(CUSTOMER, "v25", planner).keyword_ideas(config)
+        self.assertFalse(result["isGooglePlayPopularity"])
+        self.assertEqual(result["surface"], "GOOGLE_SEARCH")
+        self.assertEqual(len(result["results"]), 2)
+        calls = [payload for url, payload in planner.calls if url.endswith(":generateKeywordIdeas")]
+        self.assertEqual(calls[0]["keywordSeed"], {"keywords": ["focus timer"]})
+        self.assertEqual(calls[0]["keywordPlanNetwork"], "GOOGLE_SEARCH")
+        self.assertFalse(calls[0]["includeAdultKeywords"])
+        self.assertEqual(calls[1]["pageToken"], "next")
+        self.assertNotIn("avgMonthlySearches", result["results"][0])
+
+    def test_invalid_keyword_ideas_cannot_default_to_unscoped_worldwide_query(self):
+        for data in ({"seeds": [], "language_resource": "languageConstants/1000", "country_resources": ["geoTargetConstants/2840"]},
+                     {"seeds": ["focus"], "language_resource": "en", "country_resources": []},
+                     {"seeds": ["x"] * 21, "language_resource": "languageConstants/1000", "country_resources": ["geoTargetConstants/2840"]}):
+            with self.assertRaises(ValueError):
+                keyword_ideas_request(data)
+
+    def test_report_writes_timezone_action_metadata_and_applies_filters(self):
+        class Reports:
+            def __init__(self):
+                self.calls = []
+            def request(self, method, url, *, payload):
+                self.calls.append(copy.deepcopy(payload))
+                query = payload["query"]
+                if " FROM customer " in query:
+                    return {"results": [{"customer": {"id": CUSTOMER, "currencyCode": "USD", "timeZone": "America/New_York"}}]}
+                if "FROM conversion_action" in query:
+                    return {"results": [{"conversionAction": {"resourceName": ACTION, "name": "Purchase", "primaryForGoal": True, "countingType": "MANY_PER_CLICK", "clickThroughLookbackWindowDays": "30"}}]}
+                return {"results": [row(conversions=2)] if "segments.conversion_action" in query else [row()]}
+        fake = Reports()
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "report.csv"
+            with patch("shared.google_ads.AdsADCTransport", return_value=fake), contextlib.redirect_stdout(io.StringIO()):
+                code = main(["report", "--customer", CUSTOMER, "--api-version", "v25", "--package", "com.example.focus",
+                             "--campaign-id", "77", "--start-date", "2026-10-01", "--end-date", "2026-10-10",
+                             "--conversion-action", ACTION, "--output", str(output)])
+            self.assertEqual(code, 0)
+            metadata = json.loads(output.with_suffix(".csv.metadata.json").read_text())
+            self.assertEqual(metadata["account"]["timeZone"], "America/New_York")
+            self.assertEqual(metadata["conversionSettings"][0]["conversionAction"]["name"], "Purchase")
+            self.assertTrue(metadata["conversionSettingsVerified"])
+            self.assertEqual(metadata["metric"], "metrics.conversions")
+            for payload in fake.calls[:2]:
+                self.assertIn("campaign.id IN (77)", payload["query"])
+
+    def test_geo_and_asset_commands_export_raw_views_without_writes(self):
+        class Reports:
+            def request(self, method, url, *, payload):
+                if not url.endswith(":search"):
+                    raise AssertionError("Reports must not mutate")
+                if " FROM customer " in payload["query"]:
+                    return {"results": [{"customer": {"currencyCode": "USD", "timeZone": "UTC"}}]}
+                return {"results": []}
+        for command in ("geo-report", "asset-report"):
+            with self.subTest(command=command), tempfile.TemporaryDirectory() as directory:
+                output = Path(directory) / "report.json"
+                with patch("shared.google_ads.AdsADCTransport", return_value=Reports()), contextlib.redirect_stdout(io.StringIO()):
+                    code = main([command, "--customer", CUSTOMER, "--api-version", "v25", "--package", "com.example.focus",
+                                 "--start-date", "2026-10-01", "--end-date", "2026-10-10", "--conversion-action", ACTION,
+                                 "--output", str(output)])
+                self.assertEqual(code, 0)
+                report = json.loads(output.read_text())
+                self.assertEqual(report["dimension"], command.split("-", 1)[0])
+                self.assertEqual(report["deliveryRows"], [])
+                self.assertFalse(report["metadata"]["conversionSettingsVerified"])
+
     def test_customer_id_accepts_display_hyphens(self):
         self.assertEqual(customer_id("123-456-7890"), CUSTOMER)
 

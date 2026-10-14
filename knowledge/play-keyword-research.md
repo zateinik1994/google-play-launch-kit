@@ -99,4 +99,6 @@ candidate_field: title / shortDescription / fullDescription / research-only
 
 Google прямо связывает обнаружение с понятным, полным листингом и рекомендует избегать перегрузки текста ключами: [Get discovered on Google Play search](https://support.google.com/googleplay/android-developer/answer/4448378?hl=en).
 
-Не переносить Apple Search Ads CPC, SP или keyword rank в Google Play таблицу под теми же названиями. При сравнении платформ оставлять отдельные колонки с явной платформой и источником. App campaign conversions не раскрывают автоматически organic keyword demand; этот набор не реализует keyword scraping, сторонние ASO API или автоматический competitor gap calculation.
+Не переносить Apple Search Ads CPC, SP или keyword rank в Google Play таблицу под теми же названиями. При сравнении платформ оставлять отдельные колонки с явной платформой и источником. App campaign conversions не раскрывают автоматически organic keyword demand.
+
+Для сбора доступны [bounded public Play collector и AppStoreSpy Android API](../docs/aso-data-api.md). [Offline discovery/gaps](../docs/aso-tools.md) считает document frequency и точное покрытие фраз, не opportunity score или поисковую сложность. [Google Ads Keyword Planner](../docs/google-ads-api.md) предоставляет явно помеченный сигнал Google Search; он не становится Play query volume. Fixtures сохраняют synthetic source и не смешиваются с реальными наблюдениями.

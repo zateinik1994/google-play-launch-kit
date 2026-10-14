@@ -1,0 +1,13 @@
+{
+  "name": "google-play-launch-studio",
+  "version": "2.0.0",
+  "private": true,
+  "description": "Optional offline headless renderer for the dependency-free browser studio",
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "export": "node export.cjs",
+    "test": "node --test tests/engine.test.cjs",
+    "test:browser": "node --test tests/browser.test.cjs"
+  },
+  "dependencies": { "playwright": "1.62.1" }
+}

@@ -8,6 +8,8 @@ App campaigns автоматически комбинируют assets и опт
 
 Таргетинг автоматизирован: это не перенос Apple Search Ads exact/broad keyword структуры и ручных ставок по каждому запросу. Работа идет с целью, рынками, языками, бюджетом, conversion actions и материалами. Источник: [Assets and automated targeting](https://support.google.com/google-ads/answer/6357595?hl=en).
 
+Для внешнего исследования `google_ads.py keyword-ideas` получает Google Search Keyword Planner ideas/historical metrics с geo/language/seeds. Эти значения маркируются Google Search, а не Play popularity; они помогают расширить словарь и проверить поисковый контекст, но не превращаются в keyword bidding App campaigns или измерение Play-спроса. [API-маршрут и ограничения](../docs/google-ads-api.md#keyword-ideas-внешний-сигнал-google-search).
+
 Поддерживаемая стратегия зависит от subtype и eligibility: tCPI, tCPA, maximize conversions, value/tROAS и другие доступные варианты нужно проверять в аккаунте. Android download conversions могут измеряться через Google Play, а in-app actions требуют корректного tracking. Источники: [Bid strategies](https://support.google.com/google-ads/answer/12073727?hl=en), [App conversion tracking](https://support.google.com/google-ads/answer/6100665?hl=en).
 
 ## Готовность до бюджета
@@ -40,7 +42,7 @@ Ads installs не равны Play organic acquisitions. Дешевый CPI и р
 
 Выбор стратегии следует за задачей: набор пользователей, новые пользователи с полезным действием, engagement уже установивших, ценность/выручка или pre-registration. Не меняйте цель лишь потому, что CLI умеет другой сценарий. Точная матрица subtype/goal/bidding приведена в [Create an App campaign](https://developers.google.com/google-ads/api/docs/app-campaigns/create-campaign).
 
-В этом наборе `shared/google_ads.py create` создает только `APP_CAMPAIGN` для новых пользователей с `OPTIMIZE_IN_APP_CONVERSIONS_TARGET_CONVERSION_COST`, `targetCpa` и одной action в `selectiveOptimization`. Все три serving resources PAUSED; budget/targeting/text assets создаются atomic request. Остальные стратегии, активация и правки существующих кампаний остаются для Console/другой реализованной интеграции. Параметры, access и receipts: [API-контракт](../docs/google-ads-api.md).
+В наборе `shared/google_ads.py create` создает `APP_CAMPAIGN` с install-volume tCPI или in-app-action tCPA; последняя указывает одну action в `selectiveOptimization`. Все три serving resources PAUSED; budget/targeting/text assets создаются atomic request. `ads_manage.py` выполняет snapshot/reconcile, изменения budget/target costs и ENABLED/PAUSED явно выбранных serving entities. Не переключайте goal молча ради совместимости. Параметры, access и receipts: [API-контракт](../docs/google-ads-api.md).
 
 Карточка измерения содержит package, источник (Play/Firebase/GA4/MMP), точный resource/event, owning conversion customer, бизнес-смысл, counting, primary/secondary роль и окна. Для App campaigns оптимизация задается `selective_optimization`, а не обычным `CampaignConversionGoal`; нельзя считать account-default goals достаточной проверкой. В обычной отчетности вторичные actions могут отсутствовать в `metrics.conversions`, хотя присутствуют в `all_conversions`. Проверяйте эффективную конфигурацию конкретной кампании. Источник: [Conversion goals](https://developers.google.com/google-ads/api/docs/conversions/goals/overview).
 
@@ -73,6 +75,6 @@ Target CPA — желаемая средняя стоимость, не макс
 | CPA и cohort economics пригодны, запас риска есть | Стабильность, доступный бюджет, ограничение delivery | Ограниченный план масштабирования со старым→новым значением и следующей оценкой. Дешевый CPA без маржи не основание. |
 | Экономика или нужный breakdown неизвестны | Какие данные отсутствуют и источник получения | Запрос данных или явно ограниченный исследовательский тест; не выдавать гипотезу за окупаемость. |
 
-Учитывайте, что `report` дает campaign/day и одну выбранную action, а не geo/asset/learning/cohort настройки. Присоединяйте такие данные лишь из реальных экспортов Console/GA4/MMP/backend и с явно согласованными ключами и датами. Относительный label asset не измеряет инкрементальную эффективность; обновление материала остается проверяемой гипотезой.
+`report` дает campaign/day и одну action; package/campaign filters применяются к обоим delivery/conversion запросам, metadata хранит timezone и event settings. `geo-report` и `asset-report` получают отдельные REST views; сохраняйте presence/interest type и не суммируйте пересекающиеся asset link metrics. Learning/cohort данные присоединяйте из Console/GA4/MMP/backend с согласованными ключами/датами. Относительный label asset не измеряет инкрементальную эффективность.
 
 Журнал изменения: дата/timezone, customer/resource ID, настройка старое→новое, пригодный период и значения evidence, причина, scope поручения, stop condition, результат read-back и следующая оценка. Failed/unknown outcome записывается отдельно; локальный план не доказывает текущее состояние аккаунта.

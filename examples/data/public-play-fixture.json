@@ -1,0 +1,7 @@
+{
+  "apps": {
+    "com.example.habits": {"title": "Ritmo Habits", "summary": "Track routines and reminders", "description": "A fictional habit tracker with daily routines and reminders.", "developer": "Example", "score": 4.2, "ratings": 120, "installs": "1,000+", "minInstalls": 1000, "price": 0, "currency": "USD", "offersIAP": true}
+  },
+  "search": [{"appId": "com.example.other", "title": "Example Other"}, {"appId": "com.example.habits", "title": "Ritmo Habits"}],
+  "reviews": [{"reviewId": "fictional-1", "score": 2, "content": "The app crashes after saving.", "at": "2026-10-01T12:00:00Z", "appVersion": "1.0"}]
+}

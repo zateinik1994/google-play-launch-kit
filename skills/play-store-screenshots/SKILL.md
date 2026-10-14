@@ -1,6 +1,6 @@
 ---
 name: play-store-screenshots
-description: Подготовка и локализация phone screenshots и feature graphic для Google Play на основе реальных экранов Android-приложения, с технической проверкой файлов. Используй для визуальных материалов карточки, не для редизайна интерфейса или пакетов Wear OS, TV, Automotive и XR.
+description: Подготовка и локализация phone/tablet screenshots и feature graphic для Google Play из реальных Android captures; редактор, batch ZIP/manifest и headless export сохраненного проекта. Для Wear OS, TV, Automotive и XR нужны отдельные capture/profile workflow.
 ---
 
 # Визуальные материалы Google Play
@@ -25,9 +25,21 @@ description: Подготовка и локализация phone screenshots и
 python3 -m http.server 8000 --bind 127.0.0.1 --directory <skill-directory>/references/generator
 ```
 
-`<skill-directory>` замени абсолютным путем к этому скиллу. Открой `http://127.0.0.1:8000` и следуй README генератора: загрузи реальные PNG/JPEG, добавь название приложения, отредактируй тексты каждого кадра и локали, проверь композицию и сохрани JSON-проект. Он включает исходные изображения и все языковые варианты. Студия экспортирует phone PNG 1080×1920 и feature graphic 1024×500. Экспорт требует реальный capture, название и заголовок; файлы имеют RGB PNG без alpha. Preview guides не входят в экспорт.
+`<skill-directory>` замени абсолютным путем к этому скиллу. Открой `http://127.0.0.1:8000` и следуй README генератора: выбери настоящий source device, загрузи PNG/JPEG, упорядочь кадры, отредактируй copy/локали и сохрани JSON-проект. Студия поддерживает phone portrait/landscape, 7/10-inch tablet, safe custom dimensions, stacked/split/UI-only layouts и настройки размеров текста/UI для профиля или отдельного кадра. Feature graphic — 1024×500. Экспорт всегда использует реальный capture; name/headline нужны для layout с marketing copy. Файлы имеют RGB PNG без alpha, preview guides исключены.
 
-Проверь изображение при типичном размере на экране телефона. Сократи текст, который не помещается; не скрывай важный UI ради заголовка. Перепиши copy для каждой локали с сохранением смысла, затем проверь переносы, currency/date examples и glyph coverage. Для RTL проверь текст и композицию отдельно: студия устанавливает Canvas text direction, но не зеркалит feature graphic и не меняет UI capture. Если layout требует зеркальной композиции, подготовь отдельный layout в выбранном редакторе; сам capture не отражай по горизонтали. Если UI capture отличается между локалями, используй отдельный проект для каждой локали. JSON-проект сохраняй вместе с финальными PNG, чтобы правки можно было повторить.
+Проверь изображение при типичном размере на экране телефона. Сократи текст, который не помещается; не скрывай важный UI ради заголовка. Перепиши copy для каждой локали, проверь переносы, currency/date examples и glyph coverage. Студия зеркалит split composition и задает RTL text direction, но сохраняет сам capture. Для другого языка UI загрузи source override для выбранной локали/кадра. Fallback к default source отражается в manifest и требует проверки; не отражай UI по горизонтали. Для tablet используй настоящий tablet capture и предпочти UI-only layout.
+
+Выбери export locales/profiles и создай ZIP со всеми подходящими кадрами, feature graphics и JSON/CSV manifest: порядок, device, source/fallback, alt text, dimensions и состояния проверки. Profiles без captures не создают кадры; проверь полноту пакета. Portrait/landscape exports — альтернативные наборы, итоговый upload должен соблюдать count на устройство. Сохрани JSON v2 вместе с PNG; старые v1 projects мигрируют при открытии.
+
+## Headless export
+
+Для повторяемого экспорта сохраненного проекта используй optional Node.js 20+/Playwright renderer из той же папки. Его dependencies устанавливаются только при необходимости CLI; browser editor не требует npm. Команды установки и limits находятся в generator README.
+
+```sh
+node <skill-directory>/references/generator/export.cjs --project /absolute/path/project.json --output /absolute/path/new-assets --zip
+```
+
+CLI использует тот же renderer, localhost и заблокированные внешние requests. Выходная папка должна быть новой; ошибки очищают staging exports. Проверь RGB файлы и визуальное отображение: system fonts/antialiasing зависят от browser environment. Локальный export не загружает материалы в Console.
 
 ## Техническая проверка
 
@@ -35,9 +47,10 @@ python3 -m http.server 8000 --bind 127.0.0.1 --directory <skill-directory>/refer
 
 ```sh
 python3 <skill-directory>/references/validator --kind screenshot output/en-US/phone-*.png
+python3 <skill-directory>/references/validator --kind tablet-screenshot output/en-US/tablet-*.png
 python3 <skill-directory>/references/validator --kind feature-graphic output/en-US/feature-graphic.png
 ```
 
-Phone-валидатор проверяет базовые пределы 320–3840 px и соотношение сторон до 2:1, а не требования всех Android-устройств. Feature graphic проверяется на 1024×500. Для обоих нужен JPEG или 24-bit RGB PNG без alpha. Отличай обязательные размеры от рекомендаций для промоформатов; условия количества и device coverage смотри в knowledge.
+`screenshot` сохраняет phone-профиль 320–3840 px и соотношение до 2:1; `tablet-screenshot` проверяет large-screen профиль 1080–7680 px и 9:16/16:9. Publisher применяет его к sevenInchScreenshots/tenInchScreenshots. Feature graphic проверяется на 1024×500. Для этих файлов нужен JPEG или 24-bit RGB PNG без alpha. Отличай обязательные размеры от рекомендаций для промоформатов; условия количества и device coverage смотри в knowledge.
 
 Валидатор проверяет dimensions и encoding, CRC и размер сжатых scanlines PNG. JPEG scan data он не декодирует: открой JPEG и проверь фактическую отрисовку. Успешная техническая проверка не подтверждает policy, качество композиции, правдивость обещаний, перевод или необходимое число кадров. Верни исходные проекты, финальные файлы, порядок и локали, alt text и manifest со статусом каждой комбинации locale/device, плюс конкретные нерешенные проблемы. Для запроса A/B приложи control/variant и одну проверяемую гипотезу; не обещай рост конверсии. Загрузка выполняется только в пределах поручения пользователя.

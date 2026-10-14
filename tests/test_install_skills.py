@@ -1,4 +1,5 @@
 import json
+import csv
 import os
 import subprocess
 import sys
@@ -11,6 +12,7 @@ ROOT = Path(__file__).resolve().parent.parent
 INSTALLER = ROOT/"scripts/install_skills.py"
 
 from scripts.install_skills import runtime_status
+from test_validate_images import png
 
 
 class InstallerTests(unittest.TestCase):
@@ -30,6 +32,7 @@ class InstallerTests(unittest.TestCase):
         with patch("scripts.install_skills.importlib.util.find_spec", side_effect=ModuleNotFoundError):
             status = runtime_status()
         self.assertFalse(status["network_dependencies"])
+        self.assertFalse(status["collection_dependencies"])
         self.assertTrue(status["supported"])
         self.assertEqual(status["interpreter"], sys.executable)
 
@@ -78,6 +81,39 @@ class InstallerTests(unittest.TestCase):
             result = subprocess.run([sys.executable, str(ads_cli), "plan", "--customer", "1234567890", "--api-version", "v25", "--config", str(ads_example)], cwd=temp, capture_output=True, text=True)
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertEqual(json.loads(result.stdout)["status"], "offline-plan")
+
+    def test_copied_screenshot_validator_and_policy_safety_cli_are_self_contained(self):
+        with tempfile.TemporaryDirectory() as temp:
+            dest = Path(temp)/"skills"
+            installed = self.install(dest, "--copy")
+            self.assertEqual(installed.returncode, 0, installed.stderr)
+            image = Path(temp)/"phone.png"
+            image.write_bytes(png(1080, 1920))
+            validator = dest/"play-store-screenshots/references/validator"
+            validated = subprocess.run([sys.executable, str(validator), str(image), "--json"],
+                                       cwd=temp, capture_output=True, text=True)
+            self.assertEqual(validated.returncode, 0, validated.stderr)
+            image_result = json.loads(validated.stdout)
+            self.assertTrue(image_result["valid"])
+            self.assertEqual(image_result["results"][0]["width"], 1080)
+
+            declaration = Path(temp)/"safety.csv"
+            with declaration.open("w", encoding="utf-8", newline="") as handle:
+                writer = csv.writer(handle)
+                writer.writerow(["Question ID (machine readable)", "Response ID (machine readable)",
+                                 "Response value", "Answer requirement", "Human-friendly question label"])
+                writer.writerow(["PSL_DATA_COLLECTION_COLLECTS_PERSONAL_DATA", "", "FALSE", "REQUIRED",
+                                 "Does the app collect or share data?"])
+            safety_cli = dest/"play-policy-review/references/shared/play_safety.py"
+            for command in ("plan", "apply"):
+                with self.subTest(command=command):
+                    result = subprocess.run([sys.executable, str(safety_cli), command, "--package", "com.example.focus",
+                                             "--csv", str(declaration)], cwd=temp, capture_output=True, text=True)
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    planned = json.loads(result.stdout)
+                    self.assertEqual(planned["status"], "offline-plan")
+                    self.assertEqual(planned["proposed"]["rows"], 1)
+                    self.assertEqual(planned["payload_field"], "safetyLabels")
 
 
 if __name__ == "__main__":

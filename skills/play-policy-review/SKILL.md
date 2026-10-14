@@ -1,13 +1,13 @@
 ---
 name: play-policy-review
-description: Review Android app release readiness for Google Play using its actual build, listing, declarations, SDK data flows, reviewer access, and applicable policies. Use for a Play policy audit or preparation for submission; report unverified evidence separately from confirmed issues.
+description: Review Google Play release readiness, SDK data flows and rejection evidence; validate an evidence-backed Data safety CSV and submit it through Publisher API when instructed. Distinguish syntax validation, API acceptance and policy approval.
 ---
 
 # Google Play release readiness
 
 Подготовь проверяемый аудит конкретного приложения. Следуй языку и объему запроса пользователя; локальный аудит не расширяет поручение до изменения Console, публикации или рекламного расхода.
 
-Выбери режим по поручению: pre-submission audit, проверка конкретной policy/экрана или разбор rejection. При rejection сначала прочитай оригинальное уведомление, package/versionCode, тип enforcement и затронутые tracks; не начинай повторную отправку наугад.
+Выбери режим по поручению: pre-submission audit, проверка конкретной policy/экрана, проверка/передача Data safety CSV или разбор rejection. При rejection сначала прочитай оригинальное уведомление, package/versionCode, тип enforcement и затронутые tracks; не начинай повторную отправку наугад.
 
 ## Материалы и актуальность
 
@@ -27,6 +27,24 @@ description: Review Android app release readiness for Google Play using its actu
 
 Не скрывай реальные функции от рецензента, не предлагай обходы review. Исправление текста/документа в авторизованном scope выполняй без отдельного согласования; изменение поведения app, declarations или submission должно соответствовать поручению пользователя.
 
+## Data safety CSV и API
+
+Сначала сопоставь ответы с реальными data flows/SDK и текущим шаблоном Console. Не генерируй declaration по разрешениям manifest и не отправляй публичный sample как форму приложения. Сохрани CSV в папке выбранного приложения, отдельно от учебных examples; для live установи точный package и свежий prior CSV, экспортированный владельцем из Console.
+
+Для API прочитай [контракт Data safety](references/docs/play-api.md#data-safety-отдельный-официальный-post) и используй [bundled CLI](references/shared/play_safety.py). `<skill-directory>` замени абсолютным путем этого скилла; пути ниже обозначают выбранную папку результата:
+
+```bash
+python3 <skill-directory>/references/shared/play_safety.py plan --package com.example.app --csv workspace/app/data-safety.csv --before-csv workspace/app/before-data-safety.csv
+python3 <skill-directory>/references/shared/play_safety.py apply --package com.example.app --csv workspace/app/data-safety.csv
+python3 <skill-directory>/references/shared/play_safety.py apply --package com.example.app --csv workspace/app/data-safety.csv --before-csv workspace/app/before-data-safety.csv --backup-directory workspace/app/safety-01 --live
+```
+
+Первые две команды offline и не загружают credentials. Проверка формы CSV не подтверждает полноту conditional questions или достоверность декларации. Подготовь конкретный файл, сверку ответов с evidence и существенные изменения относительно before. Используй уже данное разрешение на выбранное declaration; если его нет, закончи reviewable файл/сравнение перед запросом согласования.
+
+Live использует `applications.dataSafety` с `safetyLabels` — **отдельный немедленный POST вне edit**. У метода нет declaration GET или validateOnly: свежесть/package prior CSV подтверждается через Console/контекст владельца. `--before-csv` и новая backup-папка обязательны; CLI сохраняет before/proposed CSV и receipt до записи. Он не объединяет Data safety с AAB/listing commit и не откатывает ее при ошибке релиза.
+
+Результат `submitted` означает acceptance API, а не policy approval или видимые labels. Проверь declaration/review/public state в Console, если доступ предоставлен. При `submission-outcome-unknown`, таймауте или failed receipt после подтвержденного ответа сначала сверь состояние; повторение автоматически запрещено. Перед восстановлением нужна новая явная запись сохраненного CSV в пределах поручения и актуальный prior export.
+
 ## Если пришел rejection
 
 Следуй [rejection workflow и шаблону ответа](references/docs/play-review-guide.md#если-получен-rejection-или-другое-enforcement). Сопоставь каждый пункт письма с воспроизводимым сценарием и текущим правилом, затем подготовь diff/evidence и повторную проверку. Различай исправление с resubmission и обоснованную appeal на ошибочное решение. Проверяй соответствующие internal/closed/open/production tracks: старый нарушающий bundle может остаться активным.
@@ -42,5 +60,7 @@ description: Review Android app release readiness for Google Play using its actu
 - Исправление и способ проверить его.
 
 Используй статусы `confirmed`, `unverified`, `not-applicable`; severity `blocker`, `risk`, `improvement`. Не путай отсутствие доказательства с подтвержденным нарушением. Финал должен дать конкретную готовность к следующему шагу и оставшиеся зависимости, не обещать одобрение Google. Для submission/rejection приложи матрицу проверок, короткий owner action list, reviewer instructions без секретов и draft ответа, если он нужен; локальный pass не называй approval или опубликованным релизом.
+
+Для Data safety приложи путь проверенного CSV, evidence gaps и точную стадию: offline-plan, unchanged, submitted, submission-rejected или submission-outcome-unknown. После live укажи backup/receipt; credentials в отчет не включай.
 
 При установленной копии все references должны существовать локально. Если пакет поврежден и reference недоступен, сообщи точный путь и продолжи аудит по доступным официальным источникам, помечая ограничение.

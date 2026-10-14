@@ -22,14 +22,14 @@ AI-агент начинает с [AGENTS.md](AGENTS.md) и читает нуж�
 
 | Скилл | Возможности |
 | --- | --- |
-| [play-aso-research](skills/play-aso-research/SKILL.md) | Конкуренты, keyword bank с источниками, локализованные метаданные |
-| [play-store-screenshots](skills/play-store-screenshots/SKILL.md) | Заголовки, реальные экраны, PNG screenshot/feature graphic |
-| [play-metadata](skills/play-metadata/SKILL.md) | Проверка, план, экспорт и загрузка текстов через Android Publisher API |
-| [play-aso-monitoring](skills/play-aso-monitoring/SKILL.md) | Сравнение предоставленных наблюдений позиций и корректная интерпретация метрик |
-| [play-store-optimization](skills/play-store-optimization/SKILL.md) | Проверка карточки, анализ отзывов, план Store listing experiment |
-| [play-policy-review](skills/play-policy-review/SKILL.md) | Подготовка к модерации и разбор отказа Google Play |
-| [google-ads-launch](skills/google-ads-launch/SKILL.md) | План, API validateOnly и создание action tCPA campaign в статусе PAUSED |
-| [google-ads-monitoring](skills/google-ads-monitoring/SKILL.md) | Чтение App campaign отчетов через API и анализ нормализованного CSV |
+| [play-aso-research](skills/play-aso-research/SKILL.md) | Сбор конкурентов, discovery фраз, coverage gaps, 22 операции AppStoreSpy, тексты |
+| [play-store-screenshots](skills/play-store-screenshots/SKILL.md) | Phone/tablet, локализованный UI, RTL, batch ZIP/manifests и headless export |
+| [play-metadata](skills/play-metadata/SKILL.md) | Тексты, графика, AAB, tracks/rollout через Publisher API с backup и receipts |
+| [play-aso-monitoring](skills/play-aso-monitoring/SKILL.md) | Сбор позиций, GCS reports, нормализация и анализ по сегментам |
+| [play-store-optimization](skills/play-store-optimization/SKILL.md) | Сбор/анализ отзывов, аудит карточки, расчет sample size эксперимента |
+| [play-policy-review](skills/play-policy-review/SKILL.md) | Review readiness, Data safety CSV/API, разбор отказа |
+| [google-ads-launch](skills/google-ads-launch/SKILL.md) | Install tCPI/action tCPA, validateOnly и создание PAUSED |
+| [google-ads-monitoring](skills/google-ads-monitoring/SKILL.md) | Campaign/geo/asset reports, snapshot/reconcile, budget/target/status updates |
 
 Общая [база знаний](knowledge/) содержит источники и даты проверки. [Различия платформ](docs/platform-differences.md) объясняют Android-механику, а [сопоставление разделов](FEATURE_PARITY.md) показывает глубину методологии и фактические границы автоматизации относительно iOS-набора.
 
@@ -79,15 +79,30 @@ python3 shared/play_api.py apply --package com.example.habits --input examples/d
 
 Все примеры вымышленные. Последняя команда по умолчанию — офлайн-план. Подробности форматов и ограничений: [CLI](docs/usage.md), [Publisher API](docs/play-api.md), [Google Ads API](docs/google-ads-api.md).
 
+Новая автоматизация также проверяется без аккаунта:
+
+```bash
+python3 shared/store_data.py profiles --package com.example.habits --locale en-GB --country GB --fixture examples/data/public-play-fixture.json --output output/demo-profiles.json
+python3 shared/aso_tools.py discover --profiles output/demo-profiles.json --seed 'habit tracker' --output output/demo-candidates.json
+python3 shared/aso_tools.py gaps --keywords output/demo-candidates.json --listings examples/data/listings.json --output output/demo-gaps.json
+python3 shared/aso_tools.py experiment --baseline-rate 0.08 --mde-relative 0.15 --daily-visitors 1000 --output output/demo-experiment.json
+python3 shared/appstorespy.py query --body examples/data/provider-query.json
+python3 shared/play_reports.py normalize --input examples/data/play-performance.csv --output output/demo-performance.json
+python3 shared/play_release.py plan --config examples/data/play-release.example.json
+python3 shared/ads_manage.py plan --config examples/data/google-ads-update.json --current examples/data/google-ads-snapshot.json --output output/demo-ads-plan.json
+```
+
+Файлы `output/demo-*` создаются один раз; для повторного запуска выберите новые пути. Подробности: [сбор ASO](docs/aso-data-api.md), [offline tools](docs/aso-tools.md), [Play reports](docs/play-reports-api.md).
+
 ## Генератор графики
 
 ```bash
 python3 -m http.server 8765 --bind 127.0.0.1 --directory examples/screenshots-generator
 ```
 
-Откройте [локальную студию](http://127.0.0.1:8765). Загрузите реальные экраны, отредактируйте тексты и локали, экспортируйте PNG. Файлы обрабатываются в браузере. Инструкция: [README генератора](examples/screenshots-generator/README.md).
+Откройте [локальную студию](http://127.0.0.1:8765). Загрузите реальные экраны, задайте тексты и локали, порядок и layout по кадрам. Экспортируйте все материалы ZIP с JSON/CSV manifests либо отдельные PNG. Файлы обрабатываются в браузере. Для воспроизводимого headless export сохраненного проекта доступен Node 20+ CLI с optional Playwright. Инструкция: [README генератора](examples/screenshots-generator/README.md).
 
-Phone screenshot preset — 1080×1920; feature graphic — 1024×500. [Validator](scripts/validate_images.py) проверяет размер/формат, а не содержание и принятие модерацией. Обязательные ограничения и рекомендации разделены в [базе графики](knowledge/play-creatives.md).
+Presets покрывают phone portrait/landscape и 7/10-inch tablet; есть безопасные custom dimensions, реальные captures по локалям и RTL composition. Feature graphic — 1024×500. [Validator](scripts/validate_images.py) имеет отдельный `tablet-screenshot` профиль и проверяет размер/формат. Содержание и принятие модерацией проверяются отдельно по [базе графики](knowledge/play-creatives.md).
 
 ## Подключить API
 
@@ -101,19 +116,24 @@ python3 -m pip install -r requirements.txt
 
 Следуйте [Publisher инструкции](docs/play-api.md) или [Google Ads инструкции](docs/google-ads-api.md). [Шаблон переменных](config/api_keys.env.example) документирует конфигурацию; `.env` автоматически не исполняется.
 
-Publisher CLI обновляет тексты основного листинга, сохраняет backup и явно требует `--live`. Он не загружает AAB/графику, не заполняет Data safety и не меняет release tracks. Google Ads CLI поддерживает конкретный сценарий Android in-app actions tCPA и создание в PAUSED; включение рекламного расхода — отдельное действие владельца. Live-проверка на реальном аккаунте не проводилась; тесты API используют подставные ответы.
+Publisher release CLI поддерживает listing/details, загрузку/замену/удаление/перестановку графики, resumable AAB upload, releases и staged rollout по точным track IDs. До изменения сохраняются данные и оригиналы изображений; неизвестный commit не повторяется автоматически. Data safety CSV отправляется отдельным официальным API с prior export/backup. Изменения требуют явного `--live`.
+
+Google Ads поддерживает install-volume/tCPI и in-app-action/tCPA create в PAUSED, отчеты campaign/geo/assets, чтение и сверку кампаний, изменения бюджетов, target cost и статусов выбранных ресурсов. Перед write сверяется свежий snapshot; activation `ENABLED` может начать расход и должна входить в поручение. Keyword Planner дает отдельный сигнал **Google Search**, не Play query volume. Live-публикация и рекламные изменения на реальном аккаунте не проверялись; API-тесты используют подставные ответы.
+
+Публичный сбор требует `pip install -r requirements-collection.txt`. AppStoreSpy использует `APPSTORESPY_API_KEY`, по умолчанию строит план и выполняет billed-вызов только с `--execute`. GCS reports требуют отдельного storage read scope и доступа к report bucket. Источники, версии, контекст и модельный характер оценок сохраняются.
 
 ## Что нельзя переносить из iOS
 
 У Google Play нет скрытого keyword field и subtitle. Нет официальной общедоступной шкалы Play Search Popularity, которую этот набор мог бы получать как Apple Ads SP. Google Ads App campaigns не предоставляют аналог ASA ручной кампании с отдельной ставкой на каждый ASO-запрос. Объяснения и источники — в [сравнении платформ](docs/platform-differences.md).
 
-Toolkit не скрейпит массово Play и не выдает предполагаемые выручку, download volume или ranking formula за измерения. Для исследования предоставьте экспорты ASO-сервиса, реальные наблюдения или используйте доступные агенту read-only источники с указанием происхождения данных.
+Toolkit ограничивает публичный сбор и не выдает предполагаемые выручку, download volume или ranking formula за измерения. Создание Store listing experiments, targeting custom listings и appeals остаются Console workflows: публичные подходящие endpoints в проверенной схеме не подтверждены. Расчет мощности эксперимента дает planning estimate, а не решение движка Google.
 
 ## Проверки и поддержка
 
 ```bash
 python3 -m unittest discover -s tests -v
 python3 scripts/check_knowledge.py
+node --test examples/screenshots-generator/tests/engine.test.cjs
 ```
 
 GitHub Actions запускает офлайн-проверки без секретов. Предметные правила проверены **14 октября 2026**; перед запуском сверяйте текущие ссылки Google и настройки Console. Для модерации начните с [review guide](docs/play-review-guide.md), для эксперимента — с [шаблона](docs/experiment-template.md).

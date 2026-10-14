@@ -7,7 +7,7 @@
 Набор помогает запускать и развивать Android-приложение в двух направлениях:
 
 - **ASO:** конкуренты и запросы, локализованные title / short description / full description, графика карточки, подготовка к модерации и последующие итерации.
-- **Google Ads App campaigns:** план кампании, проверка и создание Android in-app action tCPA campaign через API, выгрузка показателей и подготовка рекламных решений.
+- **Google Ads App campaigns:** install-volume/tCPI и in-app-action/tCPA, PAUSED create, чтение и сверка, отчеты и разрешенные изменения бюджета/target/status.
 
 Запросы про органические позиции и карточку относятся к ASO. Запросы про рекламный бюджет, conversion actions и стоимость привлечения относятся к Google Ads. У этих процессов общие сведения о продукте и креативы, но разные источники данных и способы управления.
 
@@ -24,11 +24,12 @@
 | Полное описание | [play-aso-research](skills/play-aso-research/SKILL.md): сценарии, функции, аудитория и монетизация |
 | Проверка готового текста или локалей | [play-metadata](skills/play-metadata/SKILL.md) и [контракт CLI](docs/usage.md) |
 | Скриншоты и feature graphic | [play-store-screenshots](skills/play-store-screenshots/SKILL.md) и [студия](examples/screenshots-generator/README.md) |
-| Экспорт или загрузка текстов карточки | [play-metadata](skills/play-metadata/SKILL.md) и [Publisher API](docs/play-api.md) |
+| Тексты, графика, AAB или release tracks | [play-metadata](skills/play-metadata/SKILL.md) и [Publisher API](docs/play-api.md) |
 | Подготовка модерации или разбор отказа | [play-policy-review](skills/play-policy-review/SKILL.md) и [review guide](docs/play-review-guide.md) |
 | Отзывы, аудит карточки, A/B гипотеза | [play-store-optimization](skills/play-store-optimization/SKILL.md) и [шаблон эксперимента](docs/experiment-template.md) |
 | Позиции и результаты изменения метаданных | [play-aso-monitoring](skills/play-aso-monitoring/SKILL.md) и [метрики](knowledge/play-metrics.md) |
-| Популярность запроса, загрузки или выручка конкурента | [источники](knowledge/play-keyword-research.md): экспорт/доступный сервис, происхождение и ограничения оценки |
+| Профили, выдача, подсказки, оценки конкурентов | [сбор ASO](docs/aso-data-api.md): public collection/AppStoreSpy, provenance и ограничения оценки |
+| Выгрузка показателей Play | [Play reports](docs/play-reports-api.md): GCS/Console CSV и отдельные metric families |
 | План или создание рекламы | [google-ads-launch](skills/google-ads-launch/SKILL.md) и [Google Ads API](docs/google-ads-api.md) |
 | Проверка рекламы, рост CPA, предложения изменений | [google-ads-monitoring](skills/google-ads-monitoring/SKILL.md) и [decision gates](knowledge/google-ads-app-campaigns.md) |
 | Запуск от исследования до публикации | Полный маршрут ниже |
@@ -51,23 +52,23 @@
    play-store-screenshots: история продукта → реальные экраны → локализация → QA
                   ↓
 5. Подготовка карточки Google Play
-   play-metadata: проверка → diff → backup → API commit текстов
-   Графика и остальные поля: подготовленные файлы и действия в Play Console
+   play-metadata: тексты/графика/details → plan/diff → backup → API validate/commit
                   ↓
 6. Готовность к модерации и выпуск
    play-policy-review: сборка, reviewer access, privacy/Data safety, declarations
-   Submission и rollout: Play Console или разрешенная доступная интеграция
+   AAB/tracks/rollout: play_release; Data safety CSV: play_safety
+   Остальные declarations/reviewer access и неподдерживаемые действия: Play Console
                   ↓
           Приложение доступно пользователям
                   ↓
 7. Подготовка и создание рекламы
    google-ads-launch: tracking → baseline → экономика → assets → validateOnly
    API create оставляет Campaign + AdGroup + AdGroupAd PAUSED
-   Владелец отдельно проверяет и активирует подготовленную кампанию
+   После проверки явный ads_manage status plan может активировать выбранные ресурсы
                   ↓
 8. Регулярные итерации
-   google-ads-monitoring: расходы, конверсии, задержка, качество cohort
-   play-aso-monitoring: позиции, карточка, новые запросы, гипотезы экспериментов
+   google-ads-monitoring: campaign/geo/asset reports → lag/cohort → budget/target/status plan
+   play-aso-monitoring: сбор позиций/Play reports → discovery/gaps → план эксперимента
 ```
 
 Подготовку к review начинай раньше при блокирующих проблемах сборки или данных. Для опубликованного приложения используй только нужные этапы.
@@ -142,7 +143,16 @@
 │   ├── analysis.py                   Анализ нормализованных CSV
 │   ├── metadata.py                   Listing JSON validation
 │   ├── play_api.py                   Android Publisher API v3
-│   └── google_ads.py                 Google Ads REST API
+│   ├── play_release.py               Графика/AAB/tracks и backup/receipt
+│   ├── play_safety.py                Официальный Data safety CSV POST
+│   ├── image_validation.py           Phone/tablet/feature/icon checks
+│   ├── store_data.py                 Bounded public Play collector
+│   ├── appstorespy.py                22 типизированные Android API операции
+│   ├── appstorespy_schema.json       Проверенный registry провайдера
+│   ├── aso_tools.py                  Discovery/gaps/experiment planning
+│   ├── play_reports.py               GCS reports/CSV/дневные агрегаты
+│   ├── google_ads.py                 Ads create/reports/keyword ideas
+│   └── ads_manage.py                 Snapshot/reconcile/update/activation
 ├── scripts/                          CLI wrapper, установка и валидаторы
 ├── examples/
 │   ├── data/                         Учебные JSON/CSV
@@ -160,7 +170,7 @@
 
 ## Инструменты анализа и их входные данные
 
-Офлайн-команды принимают предоставленные нормализованные файлы. Сведения о конкурентах получай через доступные агенту источники или ASO-сервис, сохраняя URL/дату/рынок. Собственного клиента AppStoreSpy, сборщика Play search results и оценщика выручки в этой версии нет.
+Офлайн-команды принимают нормализованные файлы. Публичный collector получает профили, выдачу/позиции и отзывы; AppStoreSpy клиент — типизированные provider данные с billing/provenance. Estimates не становятся фактической выручкой. Сохраняй URL/дату/рынок/метод и разделяй реальные наблюдения и fixtures.
 
 | Задача | Команда из корня клона | Режим и вход |
 | --- | --- | --- |
@@ -174,6 +184,13 @@
 | Тексты Play | `python3 shared/play_api.py list --package com.example.myapp` | Сетевое чтение через временный edit |
 | Diff карточки | `python3 shared/play_api.py plan --input examples/data/listings.json` | Offline, optional `--current` для baseline |
 | Google Ads report | `python3 shared/google_ads.py report --help` | Справка параметров; сам `report` делает сетевое чтение |
+| Профили/поиск/позиции/отзывы | `python3 shared/store_data.py --help` | Сетевой bounded public collection; `--fixture` полностью offline |
+| AppStoreSpy | `python3 shared/appstorespy.py query --body examples/data/provider-query.json` | Offline-plan; явный `--execute` может расходовать credits |
+| Кандидаты/coverage/мощность | `python3 shared/aso_tools.py --help` | Offline discover/gaps/experiment, без ранговой модели или Console writes |
+| Play CSV | `python3 shared/play_reports.py --help` | Download offline/`--execute`; normalize/summary offline |
+| Play release | `python3 shared/play_release.py plan --config examples/data/play-release.example.json` | Offline; snapshot/validate/apply сеть только с `--live` |
+| Data safety | `python3 shared/play_safety.py --help` | CSV plan offline; apply `--live` с prior export/backup |
+| Ads budget/target/status | `python3 shared/ads_manage.py --help` | Snapshot/reconcile network; plan/validate/apply offline по умолчанию |
 
 Подставляй реальные подготовленные файлы вместо fixtures. [docs/usage.md](docs/usage.md) описывает колонки CSV, сохранение результата и коды завершения.
 
@@ -192,17 +209,22 @@
 | Возможность | Что нужно | Инструкция |
 | --- | --- | --- |
 | Play list/export/apply --live | ADC со scope androidpublisher и доступ к приложению в Play Console | [Publisher API](docs/play-api.md) |
-| Ads report/validate --live/create --live | ADC со scope adwords, developer token, customer access; manager ID при соответствующей схеме | [Google Ads API](docs/google-ads-api.md) |
-| Данные конкурентов/спроса | Предоставленный экспорт или сервис с известными правами и происхождением | [Keyword research](knowledge/play-keyword-research.md) |
+| Play release/Data safety --live | Те же Publisher credentials; Data safety требует prior Console CSV export | [Publisher API](docs/play-api.md) |
+| Ads create/update/report/ideas | ADC со scope adwords, developer token, customer access; manager ID при соответствующей схеме | [Google Ads API](docs/google-ads-api.md) |
+| Public Play collection | Optional `google-play-scraper`; явный market/locale, bounded limits | [Сбор ASO](docs/aso-data-api.md) |
+| AppStoreSpy --execute | `APPSTORESPY_API_KEY`, действующий тариф/credits и разрешенный scope | [Сбор ASO](docs/aso-data-api.md) |
+| GCS reports --execute | ADC со scope devstorage.read_only и доступ к выбранному report bucket | [Play reports](docs/play-reports-api.md) |
 
-[config/api_keys.env.example](config/api_keys.env.example) описывает `GOOGLE_APPLICATION_CREDENTIALS`, `GOOGLE_ADS_DEVELOPER_TOKEN`, `GOOGLE_ADS_LOGIN_CUSTOMER_ID`. Программы читают окружение и ADC; `.env` автоматически не исполняется. Храни credentials вне клона и не проси секреты в чате. Ads customer и supported API version передаются аргументами.
+[config/api_keys.env.example](config/api_keys.env.example) описывает `GOOGLE_APPLICATION_CREDENTIALS`, `GOOGLE_ADS_DEVELOPER_TOKEN`, `GOOGLE_ADS_LOGIN_CUSTOMER_ID`, `APPSTORESPY_API_KEY`. Программы читают окружение и ADC; `.env` автоматически не исполняется. Храни credentials вне клона и не проси секреты в чате. Ads customer и supported API version передаются аргументами.
 
 Особенности сетевых операций:
 
 - Play list/export создают временный edit и удаляют его; новый edit инвалидирует прежний edit той же учетной записи. Учитывай параллельные publisher tools.
-- Play apply без `--live` — offline-план. Live получает свежие значения, сохраняет backup до PUT, выполняет validate/commit с `ERROR_IF_IN_REVIEW`. CLI обновляет тексты основного listing; AAB, графика, tracks, Data safety и custom listings требуют другого инструмента/Console.
+- Play apply без `--live` — offline-план. Text CLI сохраняет backup и использует `ERROR_IF_IN_REVIEW`. Release CLI получает свежие listing/details/images/bundles/tracks, сохраняет JSON и оригиналы image bytes до destructive writes, связывает AAB с фактическим versionCode, затем validate/commit. При unknown outcome используй receipt и read-back до повтора.
+- Data safety — отдельный официальный POST вне edits, без validateOnly/read endpoint. `play_safety` требует prior CSV и сохраняет оба CSV/receipt до отправки; syntax validation не проверяет правдивость declarations.
 - Ads plan/validate/create без `--live` — offline. Live validate использует validateOnly; live create после проверки создает все три рекламные сущности PAUSED и сохраняет receipt.
-- Ads report выполняет сетевое чтение без `--live`. Клиент не активирует рекламу, не изменяет существующие ставки/бюджеты и не создает conversion tracking.
+- Ads report/geo-report/asset-report/keyword-ideas и ads_manage snapshot/reconcile выполняют сетевое чтение. Управление existing budgets/target/status использует свежую сверку, validateOnly, повторную сверку, atomic mutate и read-back. `ENABLED` может начать расход; конкретное изменение должно входить в поручение. Conversion tracking этим CLI не создается.
+- Store listing experiments/custom listing targeting/appeals остаются Console workflows; подтвержденные public endpoints для них не найдены. Power estimate не запускает эксперимент. Google Search keyword metrics не являются спросом Google Play.
 
 Если доступа нет, продолжай подготовку и анализ имеющихся материалов. Назови недоступные измерения/действия; draft не считается отправленным запросом.
 
@@ -239,7 +261,7 @@ python3 scripts/playkit.py validate examples/data/listings.json
 python3 <путь-скилла>/references/shared/cli.py validate /absolute/path/to/listings.json
 ```
 
-В соответствующих скиллах доступны `references/shared/play_api.py` и `references/shared/google_ads.py`. Пути студии/image validator указаны в screenshots-скилле. Фиксированный каталог `~/.claude` или `~/.codex` не предполагается.
+В соответствующих скиллах доступны те же `references/shared/` CLI и schema registry, включая collector/provider/reports, release/safety и Ads management. Пути студии/image validator указаны в screenshots-скилле. Фиксированный каталог `~/.claude` или `~/.codex` не предполагается. Public collector требует отдельной установки `requirements-collection.txt`; optional headless renderer — Node 20+/Playwright по README студии.
 
 Материалы приложения сохраняй в выбранной папке, например `workspace/<app>/research`, `metadata`, `screenshots`, `reports`. Workspace, output/outputs и credentials исключены из Git. Учебные fixtures клиентскими данными не заменяй.
 
@@ -251,7 +273,9 @@ python3 <путь-скилла>/references/shared/cli.py validate /absolute/path
 | --- | --- |
 | Поля, captures, локали | [index.html](examples/screenshots-generator/index.html) |
 | Оформление редактора | [studio.css](examples/screenshots-generator/studio.css) |
-| Layout, preview, JSON save/open, RGB PNG export | [studio.js](examples/screenshots-generator/studio.js) |
+| Layout/render engine, v1→v2 migration и RTL | [engine.js](examples/screenshots-generator/engine.js) |
+| UI, reorder, locale sources, JSON save/open и ZIP/manifest export | [studio.js](examples/screenshots-generator/studio.js) |
+| Offline headless CLI того же engine | [export.cjs](examples/screenshots-generator/export.cjs) |
 | Порядок работы | [README студии](examples/screenshots-generator/README.md) |
 | Методика содержания/device coverage | [screenshots-скилл](skills/play-store-screenshots/SKILL.md) и [play-creatives](knowledge/play-creatives.md) |
 
@@ -259,12 +283,13 @@ python3 <путь-скилла>/references/shared/cli.py validate /absolute/path
 python3 -m http.server 8765 --bind 127.0.0.1 --directory examples/screenshots-generator
 ```
 
-Открой `http://127.0.0.1:8765`, загрузи реальные PNG/JPEG, задай название/тексты и локали, сохрани JSON с исходниками, экспортируй материалы. Phone preset — 1080×1920, feature graphic — 1024×500, экспорт — RGB PNG без alpha. Другие form factors требуют соответствующих captures и проверки.
+Открой `http://127.0.0.1:8765`, загрузи реальные PNG/JPEG, задай тексты/локали, device profile, layout и порядок кадров. Сохрани project JSON с исходниками; экспортируй RGB PNG или весь ZIP с JSON/CSV manifests. Presets: phone portrait/landscape, 7/10-inch tablet; feature graphic — 1024×500. Custom size не заменяет правила выбранного устройства.
 
-Осмотри каждый экспорт: читаемость на телефоне, полный UI, язык, обещания, порядок кадров. При различиях UI по языкам используй подходящие captures и проекты. Проверь файлы:
+Осмотри каждый экспорт: читаемость, полный UI, язык, обещания, порядок кадров. При различиях UI по языкам используй per-locale source override; fallback отмечается в manifest. RTL меняет композицию. Проверь файлы:
 
 ```bash
 python3 scripts/validate_images.py --kind screenshot /absolute/path/to/phone-assets
+python3 scripts/validate_images.py --kind tablet-screenshot /absolute/path/to/tablet-assets
 python3 scripts/validate_images.py --kind feature-graphic /absolute/path/to/feature-graphic.png
 ```
 
@@ -295,6 +320,7 @@ Validator не проверяет содержание, число кадров,
 ```bash
 python3 scripts/check_knowledge.py
 python3 -m unittest discover -s tests -v
+node --test examples/screenshots-generator/tests/engine.test.cjs
 ```
 
 При изменении документации проверь ссылки и команды. Изменения студии проверь в браузере: upload, locale round trip, JSON save/open, preview/export и PNG encoding. Сообщи результат, проверки и существенные ограничения.

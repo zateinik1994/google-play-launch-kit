@@ -1,0 +1,2 @@
+# Optional public-web collector; unofficial API, bounded requests only.
+google-play-scraper>=1.2.7,<2

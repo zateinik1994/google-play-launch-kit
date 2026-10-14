@@ -1,49 +1,76 @@
 # Play Launch Studio
 
-A local Canvas editor for Google Play phone screenshots (1080 × 1920) and feature graphics (1024 × 500). It uses the screenshots you upload and preserves the entire capture without cropping or stretching. It does not create app UI.
+Local Google Play artwork from your actual Android captures. The browser editor has no build step, CDN dependency, accounts or uploads. It preserves each full capture without stretching, cropping, hardware frames or generated UI.
 
-## Run
+## Run the editor
 
-From this repository:
+From the repository root:
 
 ```sh
 python3 -m http.server 8000 --bind 127.0.0.1 --directory examples/screenshots-generator
 ```
 
-Open [http://127.0.0.1:8000](http://127.0.0.1:8000). Use a modern browser with Canvas `roundRect` support. There are no build steps, CDN requests, accounts, dependencies or uploads. Files are processed in your browser. Stop the server with Ctrl+C when finished. Opening `index.html` directly also works in modern browsers, but localhost is the recommended path.
+Open [localhost](http://127.0.0.1:8000) in a modern browser. An installed screenshot skill includes the same files under `references/generator`; point `--directory` there instead. Stop the server with Ctrl+C. Files stay in your browser; changes are not auto-saved.
 
-## Create assets
+## Create and export a package
 
-1. Upload 1–8 real PNG or JPEG app captures. Select a thumbnail to edit its copy. Input captures are limited to 20 MB, 8192 px per side and 40 megapixels.
-2. Enter an app name and a brief headline. An optional supporting line and alt text are saved in your project. Empty previews contain labelled placeholders; export stays disabled until a real capture, app name and headline are present. Long copy that does not fit also disables export.
-3. Choose a color preset or edit the background, accent and text colors. Light/dark mode changes the studio, while the selected palette changes your assets.
-4. Select a listing language or add a locale such as `de-DE`. App names and feature copy are per language; screenshot copy is per capture and per language. New languages begin empty. If actual UI captures differ by locale, save a separate project for each locale.
-5. Switch between Phone and Feature graphic. Feature copy is edited separately. The selected capture is used in both layouts. Export the current asset as PNG; repeat for every capture and language you need.
-6. Save project to download a JSON file embedding all source captures and copy. Open project restores it. Changes are not auto-saved; keep your project file as the editable source. Opening a project replaces the editor session only after successful validation.
+1. Select the actual source device: phone, 7-inch tablet or 10-inch tablet. Upload real PNG/JPEG captures, up to eight per device. A resized phone capture does not demonstrate tablet UI. Use the ↑/↓ buttons to arrange the sequence for each device.
+2. Select a capture and edit its headline, supporting line and alt text. App name and copy are per language; screenshot copy is per capture. New languages start empty. `UI only` layouts can export plain captures without marketing copy.
+3. Add languages and upload a **UI source override for the selected language/capture** when the actual UI differs. Without an override, the default capture is used and clearly identified in the manifest; review whether its UI language matches your listing promises.
+4. Choose portrait/landscape phone or tablet profiles. Set stacked, split or UI-only layout, text region and relative UI size. Changes can apply to the selected capture or profile defaults. Custom phone sizes allow 320–3840 px and aspect ≤2:1; tablet sizes allow 1080–7680 px, 9:16/16:9, subject to the renderer's 24-megapixel cap. Feature graphics remain exactly 1024×500. Tablet presets use UI-only composition.
+5. For Arabic/Hebrew/Persian/Urdu and other supported RTL tags, text direction and split composition mirror automatically. The source image is never flipped. Check native glyphs, mixed numbers/names and the app's genuine RTL capture.
+6. Switch to Feature graphic, choose its source capture and edit the feature copy for each language. Feature source selection is saved in the project.
+7. Save project. Version 2 JSON embeds default/localized captures, device labels, order, copy, layouts and export selection. Version 1 projects open through migration; saving creates v2. Invalid imports leave the current session intact.
+8. Select batch languages/profiles and optional feature graphic. **Export ZIP + manifests** renders all matching captures, in device order, into one archive with RGB PNGs plus `assets-manifest.json` and `.csv`. Missing copy or overflow blocks the entire batch before download. Individual PNG export remains available.
 
-Exports are explicitly **24-bit RGB PNG**, with no alpha channel. Native Canvas PNG exports can be RGBA even when all pixels look opaque, so the studio includes a small RGB encoder. Modern browsers use the built-in `CompressionStream`; a stored-DEFLATE fallback works without it. Preview guides are always excluded from downloads.
+Export profiles are alternative sets. If you export both portrait and landscape, choose the final sequence within Play's limit of eight screenshots per device; do not upload every alternative automatically. Profiles with no matching captures produce no screenshots. Review device coverage in the manifest and ensure the intended device sets are present.
 
-## Verify
+PNG output is explicitly **24-bit RGB without alpha**. Preview guides are excluded. Native `CompressionStream` is used when available, with a stored-DEFLATE fallback. The local ZIP writer needs no external package. Alt text and order are in the manifests, not embedded as Play listing metadata inside PNG. CSV escapes spreadsheet formula prefixes.
+
+## Headless rendering from a saved project
+
+Optional CLI requires Node.js 20+ and Playwright/Chromium. The editor above does not require npm. Install the locked renderer dependencies in this directory:
 
 ```sh
-python3 scripts/validate_images.py --kind screenshot path/to/phone-assets
-python3 scripts/validate_images.py --kind feature-graphic path/to/feature-graphic.png
+npm ci --ignore-scripts
+npx playwright install chromium
+node export.cjs --project /absolute/path/project.json --output /absolute/path/new-assets --zip
 ```
 
-Run those commands from the repository root. The validator needs only Python's standard library. `--json` emits machine-readable results. Exit codes: `0` all technical checks pass, `1` at least one asset fails, `2` invalid invocation or no supported files found. Directories are searched recursively for PNG/JPEG; every file in a single invocation is treated as the selected `--kind`.
+Or from an installed skill, run `npm ci` inside `references/generator` and execute its `export.cjs`. Use `--help` for options:
 
-Phone dimensions are a recommendation preset, not the only permitted upload size. The studio targets ordinary phone listing artwork. It is not a replacement for dedicated tablet, Wear OS, TV, Automotive or XR capture workflows. Feature graphic composition guides are a local editorial inset, not an official guarantee against every crop.
+```sh
+node export.cjs --project /absolute/path/project.json --output /absolute/path/new-assets \
+  --locales en-US,ar --presets phone-portrait,phone-landscape --format screenshots
+```
 
-Review legibility, accurate app content, translated copy, screenshot counts and device coverage before uploading. The validator does not assess these. Google may change its rules; check the [official preview asset guidance](https://support.google.com/googleplay/android-developer/answer/9866151?hl=en-GB). Requirements last reviewed: 2026-10-14.
+`--format both|screenshots|feature` overrides saved selection; otherwise the project selection is used. `--browser-executable /absolute/path/chromium` can use an existing browser instead of a downloaded Playwright browser. Assets are rendered with the same `engine.js` as the editor, through a temporary localhost server; external requests are blocked. No Google accounts, API access or uploads are involved.
 
-## Plan and hand off a complete package
+The output directory must not exist. The CLI validates the whole project and preflights chosen layouts before rendering, writes into a temporary sibling folder and exposes the destination only after the whole batch succeeds. On failure, temporary exports are cleaned up. Existing output is never deliberately overwritten. JSON stdout names the final destination and manifest; it never prints embedded captures.
 
-Use the creative workflow in `knowledge/play-creatives.md` at the repository root, or `references/knowledge/play-creatives.md` in the installed screenshot skill, before assembling a new sequence: one clear user outcome per capture, UI that demonstrates it, short localized copy, and a locale/device coverage matrix. A typical phone set uses 4–8 frames; the publication minimum and recommendation eligibility are different rules. Planning copy and story does not require building a new Next.js project.
+System fonts are used. Pixel appearance can vary by OS/browser/font installation, including text antialiasing between browser processes; reproduce the browser environment for stable artwork. Every export still needs visual review.
 
-This editor has three color presets with editable colors and one layout for each output type. It exports the selected capture individually. It does not batch-export, reorder captures, upload to Console, create arbitrary slide layouts, or generate device-specific tablet/watch/TV artwork. Define the final sequence in a storyboard or manifest, name exports `phone-01-...`, `phone-02-...`, and set the intended order when uploading.
+## Limits and verification
 
-The locale controls change copy, not the captured UI. RTL languages set Canvas text direction; the feature layout remains text on the left and capture on the right. Review Arabic/Hebrew shaping and mixed numbers/names. If the composition needs mirroring, make an adapted layout in a suitable editor and use an actual RTL app capture; do not horizontally flip the UI image. Different UI language captures require separate projects.
+Source limits: 20 MB each, 8192 px per side, 40 megapixels each, 120 megapixels decoded across the project. JSON limit: 225 MB. Batch: 400 assets; ZIP: 256 MB. These are local memory limits, not Google Play upload rules. Split large locale/device projects when needed. Browser decoding/Canvas support is required.
 
-Alt text is stored in the project JSON; it is not transmitted to Console or embedded as listing metadata in the PNG. Hand off the alt text separately with each file. App name and headline are this studio's export prerequisites, not universal Google Play rules; another compliant workflow can use plain in-app captures.
+Run technical checks from the repository root:
 
-Keep project JSON, source captures, final PNGs and an asset manifest in the product's output folder. Record locale, device, order, source capture/build, headline, alt text and technical/visual/Console verification status. The project embeds full source captures; use sample data when captures contain account information. A saved project is the editable source and changes are not auto-saved.
+```sh
+python3 scripts/validate_images.py --kind screenshot /absolute/path/phone-assets
+python3 scripts/validate_images.py --kind tablet-screenshot /absolute/path/tablet-assets
+python3 scripts/validate_images.py --kind feature-graphic /absolute/path/feature-graphic.png
+```
+
+`screenshot` preserves the original phone profile; `tablet-screenshot` validates the specific large-screen 1080–7680 px, 9:16/16:9 profile. The publisher maps 7-inch and 10-inch uploads to that profile. A successful file check does not establish real-app accuracy, translation quality, screenshot counts, policy approval or Console coverage. Check [official preview asset requirements](https://support.google.com/googleplay/android-developer/answer/9866151?hl=en-GB), last reviewed 2026-10-14. Wear, TV, Automotive and XR require their own capture/profile workflow.
+
+Use the creative workflow in repository `knowledge/play-creatives.md`, or installed skill `references/knowledge/play-creatives.md`, for storyboard and review. Projects embed source captures: protect account/customer information and keep them in the product output folder.
+
+## Tests
+
+```sh
+npm test
+npm run test:browser
+```
+
+Pure engine tests require only Node. Browser integration uses synthetic PNG fixtures to verify file upload, edits, ordering, localized sources, RTL geometry, transactional import, project round trip, ZIP/manifest contents, RGB dimensions, CLI parity and refusal to overwrite. Synthetic fixtures are not store-ready app assets. Set `PLAYSTUDIO_BROWSER_EXECUTABLE` to use an installed Chromium executable during tests.

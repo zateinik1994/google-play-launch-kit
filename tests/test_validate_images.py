@@ -72,6 +72,30 @@ class ImageValidationTests(unittest.TestCase):
         self.assertTrue(self.check(png(1024, 500), "feature-graphic")["valid"])
         self.assertFalse(self.check(png(1024, 512), "feature-graphic")["valid"])
 
+    def test_tablet_profile_accepts_real_rgb_above_phone_maximum(self):
+        data = png(4096, 2304)
+        self.assertTrue(self.check(data, "tablet-screenshot")["valid"])
+        self.assertFalse(self.check(data, "screenshot")["valid"])
+        self.assertTrue(self.check(png(1440, 2560), "tablet-screenshot")["valid"])
+
+    def test_tablet_boundaries_aspect_and_alpha(self):
+        # Header-only JPEG boundary fixtures keep the test lightweight; RGB PNG
+        # decoding/integrity is exercised in the separate tablet test above.
+        for size in ((1080, 1920), (4320, 7680), (7680, 4320)):
+            self.assertTrue(self.check(jpeg_header(*size), "tablet-screenshot")["valid"])
+        for size in ((1071, 1904), (4329, 7696), (1440, 1440), (1280, 800)):
+            self.assertFalse(self.check(jpeg_header(*size), "tablet-screenshot")["valid"])
+        self.assertFalse(self.check(png(1440, 2560, color=6), "tablet-screenshot")["valid"])
+
+    def test_tablet_cli_and_legacy_phone_default_have_distinct_results(self):
+        path = self.root / "tablet.jpg"
+        path.write_bytes(jpeg_header(4096, 2304))
+        command = [sys.executable, str(SCRIPT), str(path), "--json"]
+        self.assertEqual(subprocess.run(command, capture_output=True).returncode, 1)
+        result = subprocess.run(command + ["--kind", "tablet-screenshot"], capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(json.loads(result.stdout)["results"][0]["kind"], "tablet-screenshot")
+
     def test_alpha_and_transparency_rejected_even_if_opaque(self):
         self.assertFalse(self.check(png(1080, 1920, color=6))["valid"])
         self.assertFalse(self.check(png(1080, 1920, transparent=True))["valid"])

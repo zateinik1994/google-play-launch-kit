@@ -1,0 +1,81 @@
+{
+  "customer": "1234567890",
+  "apiVersion": "v25",
+  "package": "com.example.focus",
+  "account": {
+    "id": "1234567890",
+    "currencyCode": "USD",
+    "timeZone": "America/New_York",
+    "conversionTrackingSetting": {
+      "googleAdsConversionCustomer": "customers/1234567890"
+    }
+  },
+  "campaigns": {
+    "77": {
+      "campaign": {
+        "resourceName": "customers/1234567890/campaigns/77",
+        "id": "77",
+        "name": "Focus US",
+        "status": "PAUSED",
+        "advertisingChannelType": "MULTI_CHANNEL",
+        "advertisingChannelSubType": "APP_CAMPAIGN",
+        "appCampaignSetting": {
+          "appId": "com.example.focus",
+          "appStore": "GOOGLE_APP_STORE",
+          "biddingStrategyGoalType": "OPTIMIZE_IN_APP_CONVERSIONS_TARGET_CONVERSION_COST"
+        },
+        "campaignBudget": "customers/1234567890/campaignBudgets/88",
+        "biddingStrategyType": "TARGET_CPA",
+        "targetCpa": {
+          "targetCpaMicros": "5000000"
+        },
+        "selectiveOptimization": {
+          "conversionActions": [
+            "customers/1234567890/conversionActions/123"
+          ]
+        }
+      },
+      "campaignBudget": {
+        "resourceName": "customers/1234567890/campaignBudgets/88",
+        "amountMicros": "50000000",
+        "referenceCount": "1",
+        "explicitlyShared": false
+      }
+    }
+  },
+  "adGroups": {
+    "customers/1234567890/adGroups/99": {
+      "campaign": {
+        "id": "77"
+      },
+      "adGroup": {
+        "resourceName": "customers/1234567890/adGroups/99",
+        "id": "99",
+        "status": "PAUSED"
+      }
+    }
+  },
+  "adGroupAds": {
+    "customers/1234567890/adGroupAds/99~111": {
+      "campaign": {
+        "id": "77"
+      },
+      "adGroup": {
+        "resourceName": "customers/1234567890/adGroups/99"
+      },
+      "adGroupAd": {
+        "resourceName": "customers/1234567890/adGroupAds/99~111",
+        "status": "PAUSED",
+        "ad": {
+          "id": "111",
+          "type": "APP_AD"
+        },
+        "policySummary": {
+          "approvalStatus": "APPROVED"
+        }
+      }
+    }
+  },
+  "source": "EXAMPLE_NOT_LIVE",
+  "fetchedAt": "2026-10-14T10:00:00+00:00"
+}

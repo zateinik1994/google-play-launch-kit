@@ -1,0 +1,5 @@
+{
+  "seeds": ["focus timer", "pomodoro timer", "study timer"],
+  "language_resource": "languageConstants/1000",
+  "country_resources": ["geoTargetConstants/2840"]
+}

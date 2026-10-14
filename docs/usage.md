@@ -14,6 +14,22 @@ python3 scripts/playkit.py ads-plan examples/data/campaign.json
 
 Для сохранения JSON используйте `--output путь.json` у любой команды кроме `init`. Файл результата перезаписывается, если уже существует. `init` отказывается работать в существующей папке. Коды завершения: `0` — успех, `1` — метаданные не прошли валидацию, `2` — ошибка входа/IO. Publisher API использует собственный CLI — [документация](play-api.md).
 
+## Дополнительная автоматизация
+
+| CLI | Назначение | Документация |
+| --- | --- | --- |
+| `shared/store_data.py` | Public profiles/search/ranks/reviews; offline `--fixture` | [Сбор ASO](aso-data-api.md) |
+| `shared/appstorespy.py` | 22 typed Android provider операции; offline plan/явный billed `--execute` | [Сбор ASO](aso-data-api.md) |
+| `shared/aso_tools.py` | Offline discover/gaps/experiment power estimate | [ASO tools](aso-tools.md) |
+| `shared/play_reports.py` | GCS download и отдельные legacy/click CSV normalization/summary | [Play reports](play-reports-api.md) |
+| `shared/play_release.py` | Listing/details/images/AAB/tracks; default offline, `--live` | [Publisher API](play-api.md) |
+| `shared/play_safety.py` | Data safety CSV plan/официальный POST с backup | [Publisher API](play-api.md) |
+| `shared/google_ads.py` | Install/action create, campaign/geo/asset reports, Google Search keyword ideas | [Google Ads API](google-ads-api.md) |
+| `shared/ads_manage.py` | Snapshot/reconcile, budget/target/status plan/validate/apply | [Google Ads API](google-ads-api.md) |
+| `examples/screenshots-generator/export.cjs` | Saved project→PNG/manifests/ZIP, optional Node/Playwright | [Генератор](../examples/screenshots-generator/README.md) |
+
+Используйте `--help` каждого CLI для точных параметров. Python CLI доступны из установленного скилла под `references/shared/`. Новые collectors/planners/report outputs резервируют новый путь и **не перезаписывают** existing files; правило старого `playkit.py --output` выше остается прежним. Network reports и public collection выполняют чтение без `--live`; provider/GCS используют явный `--execute`. Сетевые изменения требуют `--live` и разрешенного scope, а не только валидного файла.
+
 ## Контракты CSV
 
 UTF-8 (BOM допустим), стандартное quoting CSV. При запятых или переносах в тексте заключайте поле в двойные кавычки. Не удаляйте заголовки. Файлы `examples/data/*` — **вымышленные примеры**, а не исследование или реальные бенчмарки.

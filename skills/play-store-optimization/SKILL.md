@@ -1,6 +1,6 @@
 ---
 name: play-store-optimization
-description: Проверить метаданные Google Play, разобрать предоставленные отзывы Android-приложения или подготовить измеримый Store listing experiment.
+description: Проверить метаданные Google Play, собрать и разобрать отзывы Android-приложения или рассчитать план Store listing experiment.
 ---
 
 # Оптимизация карточки Google Play
@@ -23,7 +23,13 @@ python3 <путь-скилла>/references/shared/cli.py validate metadata/listi
 
 ## Отзывы
 
-Сначала установи происхождение и объем выгрузки, период, языки, версии и доступные фильтры. Bundled tool не загружает отзывы из Play. Сохрани raw файл; подготовь CSV `review_id,rating,text`, отдельно отделив нужные version/country/period. Дополнительные поля можно хранить в исходнике, но CLI не фильтрует по ним. При отсутствии этих полей ограничения выборки остаются неизвестными.
+Сначала установи происхождение и объем выгрузки, период, языки, версии и доступные фильтры. [Collector](references/docs/aso-data-api.md) загружает bounded выборку newest reviews и записывает совместимый CSV с metadata sidecar; AppStoreSpy предоставляет альтернативный источник. Сохрани raw файл; подготовь CSV `review_id,rating,text`, отдельно отделив нужные version/country/period. Дополнительные поля можно хранить в исходнике, но анализатор тем не фильтрует по ним. При отсутствии этих полей ограничения выборки остаются неизвестными.
+
+```bash
+python3 <путь-скилла>/references/shared/store_data.py reviews --package com.example.myapp --locale en-GB --country GB --limit 200 --output research/reviews.csv
+```
+
+Полностью одинаковые ID collector дедуплицирует; конфликтующие версии отклоняет для проверки актуальной записи. Это выборка публичных отзывов, не полный census.
 
 Убери дубли по ID по явному правилу, сохрани связь с raw данными. Обновленный отзыв не считается новым уникальным пользователем; конфликтующие версии одного ID требуют выбора записи по имеющейся дате. CLI отклоняет повтор ID, он не решает эту задачу автоматически.
 
@@ -48,6 +54,14 @@ python3 <путь-скилла>/references/shared/cli.py reviews research/review
 ## Эксперимент
 
 Прочитай [экспериментальный цикл](references/knowledge/play-metrics.md) и заполни [шаблон](references/docs/experiment-template.md). Проверь eligibility listing и доступный experiment type в текущей Console; toolkit не создает и не применяет эксперименты через API.
+
+Для оценки трафика используй [offline planner](references/docs/aso-tools.md):
+
+```bash
+python3 <путь-скилла>/references/shared/aso_tools.py experiment --baseline-rate 0.08 --mde-relative 0.15 --daily-visitors 1000 --variants 1 --output reports/experiment-plan.json
+```
+
+Подставь совместимые baseline и eligible visitors. Результат — normal-approximation power estimate с равным распределением/Bonferroni для 1–2 variants. Он не повторяет движок Google, не создает experiment и не объявляет winner.
 
 1. Запиши барьер и evidence, целевую аудиторию и одну гипотезу. Выбери действительно поддерживаемый asset; title не обещай как штатную экспериментальную поверхность.
 2. Сохрани current control и variants. Изменяй один существенный элемент, если цель — узнать его эффект. Больше изменений допустимы как тест общей концепции, но не дают эффекта каждого элемента по отдельности.
