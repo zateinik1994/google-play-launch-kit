@@ -25,7 +25,7 @@ description: Подготовка и локализация phone/tablet screens
 python3 -m http.server 8000 --bind 127.0.0.1 --directory <skill-directory>/references/generator
 ```
 
-`<skill-directory>` замени абсолютным путем к этому скиллу. Открой `http://127.0.0.1:8000` и следуй README генератора: выбери настоящий source device, загрузи PNG/JPEG, упорядочь кадры, отредактируй copy/локали и сохрани JSON-проект. Студия поддерживает phone portrait/landscape, 7/10-inch tablet, safe custom dimensions, stacked/split/UI-only layouts и настройки размеров текста/UI для профиля или отдельного кадра. Feature graphic — 1024×500. Экспорт всегда использует реальный capture; name/headline нужны для layout с marketing copy. Файлы имеют RGB PNG без alpha, preview guides исключены.
+`<skill-directory>` замени абсолютным путем к этому скиллу. Открой `http://127.0.0.1:8000` и следуй README генератора: выбери настоящий source device, загрузи PNG/JPEG, упорядочь кадры, отредактируй copy/локали и сохрани JSON-проект. Студия поддерживает phone portrait/landscape, 7/10-inch tablet, safe custom dimensions, stacked/split/UI-only layouts и настройки размеров текста/UI для профиля или отдельного кадра. Цвета задаются как project default или override отдельного screenshot/feature graphic: чередуй композиции/контраст по смыслу, сохраняя читаемость. Feature graphic — 1024×500. Экспорт всегда использует реальный capture; name/headline нужны для layout с marketing copy. Файлы имеют RGB PNG без alpha, preview guides исключены.
 
 Проверь изображение при типичном размере на экране телефона. Сократи текст, который не помещается; не скрывай важный UI ради заголовка. Перепиши copy для каждой локали, проверь переносы, currency/date examples и glyph coverage. Студия зеркалит split composition и задает RTL text direction, но сохраняет сам capture. Для другого языка UI загрузи source override для выбранной локали/кадра. Fallback к default source отражается в manifest и требует проверки; не отражай UI по горизонтали. Для tablet используй настоящий tablet capture и предпочти UI-only layout.
 
@@ -46,11 +46,11 @@ CLI использует тот же renderer, localhost и заблокиров
 Запусти linked validator с явным типом материала:
 
 ```sh
-python3 <skill-directory>/references/validator --kind screenshot output/en-US/phone-*.png
-python3 <skill-directory>/references/validator --kind tablet-screenshot output/en-US/tablet-*.png
+python3 <skill-directory>/references/validator --kind screenshot output/en-US/phone-portrait
+python3 <skill-directory>/references/validator --kind tablet-screenshot output/en-US/tablet-7-portrait
 python3 <skill-directory>/references/validator --kind feature-graphic output/en-US/feature-graphic.png
 ```
 
 `screenshot` сохраняет phone-профиль 320–3840 px и соотношение до 2:1; `tablet-screenshot` проверяет large-screen профиль 1080–7680 px и 9:16/16:9. Publisher применяет его к sevenInchScreenshots/tenInchScreenshots. Feature graphic проверяется на 1024×500. Для этих файлов нужен JPEG или 24-bit RGB PNG без alpha. Отличай обязательные размеры от рекомендаций для промоформатов; условия количества и device coverage смотри в knowledge.
 
-Валидатор проверяет dimensions и encoding, CRC и размер сжатых scanlines PNG. JPEG scan data он не декодирует: открой JPEG и проверь фактическую отрисовку. Успешная техническая проверка не подтверждает policy, качество композиции, правдивость обещаний, перевод или необходимое число кадров. Верни исходные проекты, финальные файлы, порядок и локали, alt text и manifest со статусом каждой комбинации locale/device, плюс конкретные нерешенные проблемы. Для запроса A/B приложи control/variant и одну проверяемую гипотезу; не обещай рост конверсии. Загрузка выполняется только в пределах поручения пользователя.
+Пути выше соответствуют batch/CLI export; при другом выборе profiles подставь фактическую папку из manifest. Валидатор проверяет dimensions и encoding, CRC и размер сжатых scanlines PNG. JPEG scan data он не декодирует: открой JPEG и проверь фактическую отрисовку. Успешная техническая проверка не подтверждает policy, качество композиции, правдивость обещаний, перевод или необходимое число кадров. Для покрытия target locales используй [locale inventory](references/docs/readiness.md) с project/listings/manifest. Верни исходные проекты, финальные файлы, порядок и локали, alt text и manifest со статусом каждой комбинации locale/device, плюс конкретные нерешенные проблемы. Для запроса A/B приложи control/variant и одну проверяемую гипотезу; не обещай рост конверсии. Загрузка выполняется только в пределах поручения пользователя.

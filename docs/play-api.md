@@ -83,6 +83,8 @@ python3 -m shared.play_api apply \
 
 Последовательность: локальная проверка → создание edit → свежий снимок карточек → сохранение резервного JSON → PUT изменившихся локалей → серверный validate → commit. При отсутствии изменений edit удаляется и возвращается `status: unchanged`. Если `--backup` не указан, используется уникальное имя в `outputs/play-backups/`. Ошибка сохранения снимка останавливает работу до первого PUT. `--current` относится только к offline-плану; live всегда получает свежий снимок.
 
+Существующий `--output` для export или `--backup` для live apply отклоняется до загрузки credentials и создания edit, включая broken symlink. Выбирайте новые пути: создание лишнего edit могло бы инвалидировать другую незавершенную операцию этой учетной записи.
+
 Серверный [validate](https://developers.google.com/android-publisher/api-ref/rest/v3/edits/validate) проверяет edit, но не заменяет проверку Google и не обещает мгновенную публикацию. [Commit](https://developers.google.com/android-publisher/api-ref/rest/v3/edits/commit) учитывает review и publishing settings приложения; появление карточки в магазине может произойти позже.
 
 Сохраните выведенные edit ID, diff и путь backup в папке приложения. После commit проверьте Publishing overview/review state в Console и карточку нужной локали. `export` после commit может подтвердить серверные тексты, но не доказывает, что они уже отображаются каждому пользователю; такой экспорт также создает новый edit. Используйте отдельное имя файла и учитывайте другие процессы публикации.
@@ -98,6 +100,8 @@ python3 -m shared.play_api apply \
 До commit изменения находятся в edit и могут быть отброшены. После commit нет автоматического rollback: подготовьте новый проверяемый план с сохраненным снимком и при необходимости примените его отдельным запуском. Клиент сохраняет и обновляет только тексты; он не восстанавливает скриншоты, релизы или настройки приложения.
 
 Восстановление baseline через `apply` возвращает тексты переданных локалей. Если предыдущий запуск создал **новую** локаль, которой нет в baseline, такое восстановление не удалит ее: удаление локали выполняется отдельным поддерживаемым способом и требует собственного проверенного scope. Также перед восстановлением сравните свежие серверные значения, чтобы не затереть последующие изменения владельца.
+
+Если baseline не содержит `video`, а после него видео было добавлено, для удаления передайте явное `"video":""`: отсутствие поля сохраняет текущую ссылку. Для восстановления полного release-плана используйте `play_release` и его `rollback.json`, который уже учитывает это различие и удаление добавленных локалей.
 
 | Ошибка/состояние | Проверка и следующий шаг |
 | --- | --- |
@@ -185,6 +189,8 @@ App details — публичные контакты, не privacy policy/Data sa
 
 Из ответа берется настоящий integer `versionCode`; при несовпадении с expected edit не коммитится. В `tracks[].releases[].versionCodes` строка `"$uploaded"` заменяется этим ответом; без `bundle` она недопустима. Клиент не угадывает versionCode из имени файла. SHA-256 локальных файлов проверяется при планировании и перед загрузкой, чтобы не отправить изменившийся артефакт.
 
+Version codes уникальны по числовому значению: `"42"` и `"0042"` — одна версия. `$uploaded` также не должен совпадать с сохраняемой версией. При известном expected это проверяется локально, иначе — по ответу upload до отправки track PUT; совпадение отбрасывает edit без commit.
+
 ### Tracks, notes и rollout
 
 ```json
@@ -203,17 +209,30 @@ App details — публичные контакты, не privacy policy/Data sa
 
 Release notes — уникальные language/text, максимум 500 Unicode code points на язык по [release guide](https://support.google.com/googleplay/android-developer/answer/9859348?hl=en). Locale syntax проверяется локально; поддержка и актуальные требования — сервером. Код не обходит production access/testing gate, review, country availability и managed publishing. Commit со статусом completed не доказывает, что выпуск уже виден пользователям.
 
+### Review/publishing state без edit
+
+Для состояния конкретного track доступен официальный [applications.tracks.releases.list](https://developers.google.com/android-publisher/api-ref/rest/v3/applications.tracks.releases/list). `release-state` использует GET вне Edits API и не создает edit:
+
+```bash
+python3 -m shared.play_release release-state --package com.example.app --track production
+python3 -m shared.play_release release-state --package com.example.app --track production --live --output release-state.json
+```
+
+Первая команда offline. Live возвращает releaseName, точный track, activeArtifacts/versionCode и releaseLifecycleState с источником/временем чтения. Используйте конкретный versionCode для сопоставления отправленного AAB; имя релиза может повторяться. IN_REVIEW, APPROVED_NOT_PUBLISHED, NOT_APPROVED и PUBLISHED отражают разные стадии. По [схеме lifecycle](https://developers.google.com/android-publisher/api-ref/rest/v3/applications.tracks.releases), PUBLISHED включает частичный rollout и halted release; не означает полный rollout или видимость текста карточки в выбранном рынке/языке. API исключает obsolete releases и возвращает максимум 20: пустой ответ не доказывает историю релизов или одобрение приложения. Отсутствующее/неизвестное lifecycle значение не считайте approval. Команда только читает, не отправляет pending changes на review и не публикует approved release.
+
 ### Backups, восстановление и неизвестный исход
 
 Перед **первой** загрузкой/PUT/PATCH/DELETE создается новая backup directory. Она содержит:
 
 - `snapshot.json`: listings, details, текущие tracks/bundle metadata и IDs/URL/hash затронутых image groups.
 - Оригинальные бинарные изображения + `assets.json` с путем и проверенным SHA-256.
-- `rollback.json`: готовый config восстановления затронутых текстов/контактов/groups/tracks; добавленные локали удаляются явно.
+- `rollback.json`: готовый config восстановления затронутых текстов/контактов/groups/tracks; добавленные локали удаляются явно, исходное отсутствие video восстанавливается пустой строкой.
 - `transaction.json`: durable состояние staging/commit-pending/committed/validated-only либо staging-failed/commit-rejected/commit-outcome-unknown.
 - `result.json` при подтвержденном результате.
 
-Backup изображения скачивается без Publisher bearer token с разрешенных Google image hosts; SHA-256 или SHA-1 из API сравнивается с оригиналом. Если URL возвращает scaled preview, клиент пробует original-size variant и снова проверяет hash. При отсутствии checksum, недоступном файле или несовпадении **запись прекращается до destructive операций**. Existing backup directory не перезаписывается. Восстановление проходит тот же план/validate/apply:
+Backup изображения скачивается без Publisher bearer token с разрешенных Google image hosts; SHA-256 или SHA-1 из API сравнивается с оригиналом. Если URL возвращает scaled preview, клиент пробует original-size variant и снова проверяет hash. При отсутствии checksum, недоступном файле или несовпадении **запись прекращается до destructive операций**. Existing backup directory не перезаписывается.
+
+Заранее существующий backup path отклоняется до создания edit; остальные ошибки записи резервной копии блокируют изменение уже открытого edit. Восстановление проходит тот же план/validate/apply:
 
 ```bash
 python3 -m shared.play_release plan --config outputs/release-01/rollback.json
@@ -250,6 +269,8 @@ python3 -m shared.play_safety apply --package com.example.app --csv data-safety.
 Формат проверен на публичном CSV sample из [официальной Data safety справки](https://support.google.com/googleplay/android-developer/answer/10787469?hl=en) 14 октября 2026. Фактические headers: `Question ID (machine readable)`, **`Response ID (machine readable)`**, `Response value`, `Answer requirement`, `Human-friendly question label`. Принимается UTF-8/BOM, TRUE/FALSE/blank; проверяются CSV shape, уникальность question/response, обязательные ответы и максимум один TRUE для SINGLE_CHOICE. IDs из текущего шаблона передаются как есть, не генерируются из кода приложения. Conditional полноту, наличие всех SDK/data flows и правильность заявления подтверждает аудит продукта/Console, а не синтаксический validator. Public sample содержит демонстрационные ответы и не является declaration приложения пользователя.
 
 Receipt состояния: submission-pending, submitted, submission-rejected или submission-outcome-unknown. Timeout/408/5xx/неожиданный ответ не повторяются автоматически; сначала проверь Console. `submitted` означает acceptance API, не одобрение policy или появление labels. Восстановление выполняется новой явной записью сохраненного before CSV с новым prior export/backup, если входит в поручение.
+
+Каждый CSV читается один раз за операцию с локальным пределом 4 MiB. Сравнение, SHA-256, архивные файлы и payload используют один снимок этих байтов; изменение исходного файла во время запуска не подменяет подготовленный snapshot. При одинаковых proposed/prior байтах результат `unchanged`, без credentials, backup и POST. Существующая backup-папка для измененного declaration отклоняется до загрузки credentials.
 
 ```bash
 python3 -m unittest discover -s tests -p 'test_play_safety.py' -v

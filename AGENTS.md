@@ -27,6 +27,8 @@
 | Тексты, графика, AAB или release tracks | [play-metadata](skills/play-metadata/SKILL.md) и [Publisher API](docs/play-api.md) |
 | Подготовка модерации или разбор отказа | [play-policy-review](skills/play-policy-review/SKILL.md) и [review guide](docs/play-review-guide.md) |
 | Отзывы, аудит карточки, A/B гипотеза | [play-store-optimization](skills/play-store-optimization/SKILL.md) и [шаблон эксперимента](docs/experiment-template.md) |
+| Пропущенные локали или готовность к выпуску | [Locale inventory и evidence checklist](docs/readiness.md), затем [play-policy-review](skills/play-policy-review/SKILL.md) |
+| Состояние review/publishing релиза | [Publisher release-state](docs/play-api.md) — GET вне edit |
 | Позиции и результаты изменения метаданных | [play-aso-monitoring](skills/play-aso-monitoring/SKILL.md) и [метрики](knowledge/play-metrics.md) |
 | Профили, выдача, подсказки, оценки конкурентов | [сбор ASO](docs/aso-data-api.md): public collection/AppStoreSpy, provenance и ограничения оценки |
 | Выгрузка показателей Play | [Play reports](docs/play-reports-api.md): GCS/Console CSV и отдельные metric families |
@@ -56,7 +58,9 @@
                   ↓
 6. Готовность к модерации и выпуск
    play-policy-review: сборка, reviewer access, privacy/Data safety, declarations
+   readiness: target locale inventory и свидетельства проверок для конкретного build
    AAB/tracks/rollout: play_release; Data safety CSV: play_safety
+   release-state: фактический lifecycle через GET без нового edit
    Остальные declarations/reviewer access и неподдерживаемые действия: Play Console
                   ↓
           Приложение доступно пользователям
@@ -150,6 +154,7 @@
 │   ├── appstorespy.py                22 типизированные Android API операции
 │   ├── appstorespy_schema.json       Проверенный registry провайдера
 │   ├── aso_tools.py                  Discovery/gaps/experiment planning
+│   ├── readiness.py                  Locale inventory и evidence checklist
 │   ├── play_reports.py               GCS reports/CSV/дневные агрегаты
 │   ├── google_ads.py                 Ads create/reports/keyword ideas
 │   └── ads_manage.py                 Snapshot/reconcile/update/activation
@@ -187,8 +192,10 @@
 | Профили/поиск/позиции/отзывы | `python3 shared/store_data.py --help` | Сетевой bounded public collection; `--fixture` полностью offline |
 | AppStoreSpy | `python3 shared/appstorespy.py query --body examples/data/provider-query.json` | Offline-plan; явный `--execute` может расходовать credits |
 | Кандидаты/coverage/мощность | `python3 shared/aso_tools.py --help` | Offline discover/gaps/experiment, без ранговой модели или Console writes |
+| Покрытие локалей и launch checklist | `python3 shared/readiness.py --help` | Offline inventory и provided-evidence checks по package/release; не approval |
 | Play CSV | `python3 shared/play_reports.py --help` | Download offline/`--execute`; normalize/summary offline |
 | Play release | `python3 shared/play_release.py plan --config examples/data/play-release.example.json` | Offline; snapshot/validate/apply сеть только с `--live` |
+| Review/publishing state | `python3 shared/play_release.py release-state --package com.example.myapp --track production` | Offline-read-plan; `--live` — GET вне edit, до20 актуальных release summaries |
 | Data safety | `python3 shared/play_safety.py --help` | CSV plan offline; apply `--live` с prior export/backup |
 | Ads budget/target/status | `python3 shared/ads_manage.py --help` | Snapshot/reconcile network; plan/validate/apply offline по умолчанию |
 
@@ -197,6 +204,7 @@
 Важные особенности:
 
 - `keywords` упорядочивает редакционную релевантность, сохраняет volume и источник, не измеряет спрос. Relevance=0 остается в bank как `excluded`; в final shortlist он не входит.
+- `discover/gaps` сохраняют числа, scope и provenance. Optional competitor profiles сравниваются только в совместимом locale/country; конфликт source decisions требует product-fit review. Fixture marker не теряется при передаче банка в gaps.
 - Пустой rank означает «за depth», пропущенная строка — отсутствие наблюдения. Разные source/depth не дают точного числового изменения.
 - Темы `reviews` определяются словарем; проверь исходные тексты перед выводами.
 - `ads-report` использует полный расход кампании и выбранную конверсию. Не суммируй повторенный cost отчетов для разных actions.
@@ -220,6 +228,7 @@
 Особенности сетевых операций:
 
 - Play list/export создают временный edit и удаляют его; новый edit инвалидирует прежний edit той же учетной записи. Учитывай параллельные publisher tools.
+- Для lifecycle review/publishing используй `release-state --live`, который читает без edit. Это максимум20 non-obsolete summaries; `PUBLISHED` допускает partial/halted delivery и не подтверждает видимость listing или полный rollout.
 - Play apply без `--live` — offline-план. Text CLI сохраняет backup и использует `ERROR_IF_IN_REVIEW`. Release CLI получает свежие listing/details/images/bundles/tracks, сохраняет JSON и оригиналы image bytes до destructive writes, связывает AAB с фактическим versionCode, затем validate/commit. При unknown outcome используй receipt и read-back до повтора.
 - Data safety — отдельный официальный POST вне edits, без validateOnly/read endpoint. `play_safety` требует prior CSV и сохраняет оба CSV/receipt до отправки; syntax validation не проверяет правдивость declarations.
 - Ads plan/validate/create без `--live` — offline. Live validate использует validateOnly; live create после проверки создает все три рекламные сущности PAUSED и сохраняет receipt.
@@ -249,7 +258,7 @@ python3 -m pip install -r requirements.txt
 ./install.sh --target directory --directory /absolute/path/to/skills --copy
 ```
 
-`--check` показывает состояние установки, фактический Python и наличие optional dependencies для сети. Он не проверяет credentials или доступ к аккаунту. Симлинки используют общие материалы текущего клона, `--copy` раскрывает их для переносимой копии. Установщик не перезаписывает существующий скилл.
+`--check` показывает состояние установки, фактический Python и наличие optional dependencies для сети. Он не проверяет credentials или доступ к аккаунту. Симлинки используют общие материалы текущего клона, `--copy` раскрывает их для переносимой копии и исключает runtime directories (`node_modules`, `.venv`, caches). Optional dependencies устанавливаются отдельно по месту использования. Установщик не перезаписывает существующий скилл.
 
 Команды с `<путь-скилла>` используют его реальное расположение:
 
@@ -283,7 +292,7 @@ python3 <путь-скилла>/references/shared/cli.py validate /absolute/path
 python3 -m http.server 8765 --bind 127.0.0.1 --directory examples/screenshots-generator
 ```
 
-Открой `http://127.0.0.1:8765`, загрузи реальные PNG/JPEG, задай тексты/локали, device profile, layout и порядок кадров. Сохрани project JSON с исходниками; экспортируй RGB PNG или весь ZIP с JSON/CSV manifests. Presets: phone portrait/landscape, 7/10-inch tablet; feature graphic — 1024×500. Custom size не заменяет правила выбранного устройства.
+Открой `http://127.0.0.1:8765`, загрузи реальные PNG/JPEG, задай тексты/локали, device profile, layout, палитру проекта или отдельного кадра и порядок. Сохрани project JSON с исходниками; экспортируй RGB PNG или весь ZIP с JSON/CSV manifests. Presets: phone portrait/landscape, 7/10-inch tablet; feature graphic — 1024×500. Custom size не заменяет правила выбранного устройства.
 
 Осмотри каждый экспорт: читаемость, полный UI, язык, обещания, порядок кадров. При различиях UI по языкам используй per-locale source override; fallback отмечается в manifest. RTL меняет композицию. Проверь файлы:
 
@@ -305,6 +314,7 @@ Validator не проверяет содержание, число кадров,
 - [ ] Платные функции и ограничения последовательно объяснены в карточке, графике и продукте.
 - [ ] Графика содержит реальные Android captures; экспорт осмотрен, локализован и проверен.
 - [ ] Review findings имеют доказательства и статус; неизвестные data flows/SDK/permissions отмечены.
+- [ ] При подготовке полного выпуска locale inventory и evidence checklist привязаны к выбранному package/build; CHECKLIST_RECORDED не назван одобрением магазина.
 - [ ] Внешние изменения соответствуют разрешению; ранее данное разрешение учтено.
 - [ ] Фактическое состояние названо: draft, validated-only, committed, created-paused, опубликовано.
 - [ ] Для Play записи есть backup; при неизвестном commit состояние проверено до повтора.

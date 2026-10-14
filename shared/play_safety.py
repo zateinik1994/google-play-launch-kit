@@ -6,6 +6,7 @@ import csv
 import hashlib
 import io
 import json
+import os
 import re
 import sys
 from pathlib import Path
@@ -22,8 +23,10 @@ REQUIREMENTS = {'OPTIONAL', 'REQUIRED', 'MULTIPLE_CHOICE', 'SINGLE_CHOICE', 'MAY
 
 
 def read_csv(path):
-    data = Path(path).read_bytes()
-    require(len(data) <= 4 * 1024 * 1024, 'Data safety CSV exceeds the local 4 MiB limit')
+    limit = 4 * 1024 * 1024
+    with Path(path).open('rb') as stream:
+        data = stream.read(limit + 1)
+    require(len(data) <= limit, 'Data safety CSV exceeds the local 4 MiB limit')
     text = data.decode('utf-8-sig')
     reader = csv.DictReader(io.StringIO(text))
     require(reader.fieldnames is not None and len(set(reader.fieldnames)) == len(reader.fieldnames) and set(HEADERS) <= set(reader.fieldnames), 'Use current Console export CSV headers: ' + ', '.join(HEADERS))
@@ -45,28 +48,36 @@ def read_csv(path):
             'warnings': ['Syntax validation does not resolve conditional questions or prove data flows/SDK declarations. Use current Console template and evidence-backed responses.']}
 
 
-def plan(package, csv_path, before_csv=None):
+def _prepare(package, csv_path, before_csv=None):
     require(isinstance(package, str) and bool(re.fullmatch(r'[A-Za-z][A-Za-z0-9_]*(?:\.[A-Za-z][A-Za-z0-9_]*)+', package)), 'Invalid Android package')
     proposed = read_csv(csv_path)
     previous = read_csv(before_csv) if before_csv else None
-    return {'status': 'offline-plan', 'package_name': package, 'proposed': {k:v for k,v in proposed.items() if k not in {'text','bytes'}},
+    summary = {'status': 'offline-plan', 'package_name': package, 'proposed': {k:v for k,v in proposed.items() if k not in {'text','bytes'}},
             'before': {k:v for k,v in previous.items() if k not in {'text','bytes'}} if previous else None,
             'same_file_contents': proposed['sha256'] == previous['sha256'] if previous else None,
             'endpoint': f'{API_ROOT}/applications/{package}/dataSafety', 'payload_field': 'safetyLabels',
             'note': 'No edit or validateOnly/read declaration endpoint. Before live, provide a fresh prior CSV exported from Console; a successful write is not policy approval.'}
+    return summary, proposed, previous
+
+
+def plan(package, csv_path, before_csv=None):
+    return _prepare(package, csv_path, before_csv)[0]
 
 
 def apply(package, csv_path, before_csv, backup_directory, transport):
-    summary = plan(package, csv_path, before_csv)
     require(before_csv is not None, 'Live Data safety requires --before-csv: Publisher exposes no declaration read/backup endpoint')
-    proposed, previous = read_csv(csv_path), read_csv(before_csv)
+    summary, proposed, previous = _prepare(package, csv_path, before_csv)
+    return _submit(summary, proposed, previous, backup_directory, transport)
+
+
+def _submit(summary, proposed, previous, backup_directory, transport):
     if summary['same_file_contents']:
         return dict(summary, status='unchanged', note='No write: proposed CSV matches supplied prior export')
     directory = Path(backup_directory)
     directory.mkdir(parents=True, exist_ok=False)
     (directory/'before.csv').write_bytes(previous['bytes'])
     (directory/'proposed.csv').write_bytes(proposed['bytes'])
-    record = dict(status='submission-pending', package_name=package, before_sha256=previous['sha256'], proposed_sha256=proposed['sha256'], backup=str(directory.resolve()))
+    record = dict(status='submission-pending', package_name=summary['package_name'], before_sha256=previous['sha256'], proposed_sha256=proposed['sha256'], backup=str(directory.resolve()))
     receipt(directory/'transaction.json', record)
     try:
         response = transport.request('POST', summary['endpoint'], payload={'safetyLabels': proposed['text']})
@@ -100,12 +111,15 @@ def main(argv=None):
     parser.add_argument('--live',action='store_true')
     args=parser.parse_args(argv)
     try:
-        summary=plan(args.package,args.csv,args.before_csv)
+        summary, proposed, previous = _prepare(args.package,args.csv,args.before_csv)
         if args.command=='plan' or not args.live:
             result=summary
         else:
             require(args.before_csv is not None and args.backup_directory is not None, 'Live Data safety requires --before-csv and a new --backup-directory')
-            result=apply(args.package,args.csv,args.before_csv,args.backup_directory,ADCTransport())
+            if not summary['same_file_contents'] and os.path.lexists(args.backup_directory):
+                raise FileExistsError('Backup directory already exists; choose a new path before loading credentials')
+            transport = ADCTransport() if not summary['same_file_contents'] else None
+            result = _submit(summary, proposed, previous, args.backup_directory, transport)
         print(json.dumps(result,ensure_ascii=False,indent=2))
         return 0
     except (ValueError,OSError,UnicodeError,csv.Error) as exc:

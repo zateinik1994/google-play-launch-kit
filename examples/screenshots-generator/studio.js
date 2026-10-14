@@ -10,6 +10,12 @@
   let state = E.emptyProject(), images = new Map(), busy = false, problem = '';
   const selected = () => state.captures.find(c => c.id === state.selectedId);
   const currentCopy = () => state.format === 'feature-graphic' ? state.locales[state.locale].feature : selected()?.copy[state.locale] || state.locales[state.locale].draft;
+  const editPalette = () => $('palette-scope').value === 'project' ? state.palette : E.paletteFor(state, selected(), state.format);
+  function setPalette(value) {
+    if ($('palette-scope').value === 'project' || state.format === 'screenshot' && !selected()) state.palette = { ...value };
+    else if (state.format === 'feature-graphic') state.featurePalette = { ...value };
+    else selected().palette = { ...value };
+  }
   const tell = (message, error = false) => { $('status').textContent = message; $('status').classList.toggle('error', error); };
   const decoder = url => new Promise((resolve, reject) => { const image = new Image(); image.onload = () => resolve(image); image.onerror = () => reject(new Error('Could not decode the PNG/JPEG source.')); image.src = url; });
   const readFile = file => new Promise((resolve, reject) => { const r = new FileReader(); r.onload = () => resolve(r.result); r.onerror = () => reject(new Error('Could not read local file.')); r.readAsDataURL(file); });
@@ -17,7 +23,7 @@
   function setBusy(value) { busy = value; document.querySelector('main').inert = value; $('export').disabled = value || !!problem; $('export-batch').disabled = value || !state.captures.length; }
   async function installProject(input) { const result = await E.validateProject(input, decoder); state = result.project; images = result.images; syncFields(); return state; }
   function options() { return { ...E.presets, ...state.customProfiles }; }
-  function currentJob() { return { locale: state.locale, profileId: state.format === 'feature-graphic' ? 'feature-graphic' : state.profileId, captureId: state.selectedId, kind: state.format, order: selected() ? state.captures.filter(c => c.device === selected().device).findIndex(c => c.id === state.selectedId) + 1 : 0 }; }
+  function currentJob() { return { locale: state.locale, profileId: state.format === 'feature-graphic' ? 'feature-graphic' : state.profileId, captureId: state.selectedId, kind: state.format, order: state.format === 'screenshot' && selected() ? state.captures.filter(c => c.device === selected().device).findIndex(c => c.id === state.selectedId) + 1 : 0 }; }
   function checkboxList(id, values, selection, change) {
     $(id).replaceChildren(...values.map(value => {
       const label = document.createElement('label'); label.className = 'check';
@@ -32,7 +38,8 @@
     $('app-name').value = state.locales[state.locale].appName;
     $('headline').value = currentCopy().headline; $('subtitle').value = currentCopy().subtitle; $('alt-text').value = currentCopy().altText;
     $('headline-scope').textContent = state.format === 'screenshot' ? 'for this capture' : 'for the feature graphic';
-    for (const key of ['background', 'accent', 'foreground']) $(key).value = state.palette[key];
+    for (const key of ['background', 'accent', 'foreground']) $(key).value = editPalette()[key];
+    $('reset-palette').disabled = !(state.format === 'feature-graphic' ? state.featurePalette : selected()?.palette);
     for (const button of document.querySelectorAll('[data-format]')) { const active = button.dataset.format === state.format; button.classList.toggle('active', active); button.setAttribute('aria-pressed', String(active)); }
     $('profile').replaceChildren(...Object.entries(options()).map(([id, p]) => { const o = document.createElement('option'); o.value = id; o.textContent = `${id} · ${p.width}×${p.height}`; return o; }));
     $('profile').value = state.profileId; $('profile').disabled = state.format === 'feature-graphic';
@@ -62,7 +69,13 @@
         move.addEventListener('click', () => { [state.captures[index], state.captures[other]] = [state.captures[other], state.captures[index]]; syncFields(); tell('Order updated. Save the project to preserve it.'); }); actions.append(move);
       }
       const remove = document.createElement('button'); remove.textContent = '×'; remove.setAttribute('aria-label', `Remove capture ${index + 1}`);
-      remove.addEventListener('click', () => { state.captures = state.captures.filter(c => c.id !== capture.id); for (const key of [...images.keys()]) if (key.startsWith(`${capture.id}:`)) images.delete(key); if (state.selectedId === capture.id) state.selectedId = state.captures[0]?.id || null; if (state.featureCaptureId === capture.id) state.featureCaptureId = state.selectedId; syncFields(); });
+      remove.addEventListener('click', () => {
+        state.captures = state.captures.filter(c => c.id !== capture.id);
+        for (const key of [`${capture.id}:default`, ...Object.keys(capture.sources || {}).map(code => `${capture.id}:${code}`)]) images.delete(key);
+        if (state.selectedId === capture.id) state.selectedId = state.captures[0]?.id || null;
+        if (state.featureCaptureId === capture.id) state.featureCaptureId = state.selectedId;
+        syncFields();
+      });
       actions.append(remove); item.append(button, actions); return item;
     }));
     const c = selected(), source = c && E.sourceFor(c, state.locale);
@@ -72,7 +85,7 @@
   }
   function render() {
     problem = '';
-    const p = E.profile(state, state.format === 'feature-graphic' ? 'feature-graphic' : state.profileId);
+    const p = { ...E.profile(state, state.format === 'feature-graphic' ? 'feature-graphic' : state.profileId), ...(state.format === 'screenshot' ? selected()?.layouts?.[state.profileId] || {} : {}) };
     $('preview-title').textContent = state.format === 'feature-graphic' ? 'Feature graphic' : `${p.device} screenshot`;
     $('size-label').textContent = `${p.width} × ${p.height} · ${p.layout}`; canvas.classList.toggle('feature', p.width > p.height);
     if (!selected()) {
@@ -99,8 +112,10 @@
   $('app-name').addEventListener('input', e => { state.locales[state.locale].appName = e.target.value; render(); });
   for (const [field, key] of [['headline', 'headline'], ['subtitle', 'subtitle'], ['alt-text', 'altText']]) $(field).addEventListener('input', e => { currentCopy()[key] = e.target.value; render(); });
   $('locale').addEventListener('change', e => { state.locale = e.target.value; syncFields(); tell(''); });
-  for (const key of ['background', 'accent', 'foreground']) $(key).addEventListener('input', e => { state.palette[key] = e.target.value; render(); });
-  for (const button of document.querySelectorAll('[data-palette]')) button.addEventListener('click', () => { state.palette = { ...palettes[button.dataset.palette] }; syncFields(); });
+  for (const key of ['background', 'accent', 'foreground']) $(key).addEventListener('input', e => { setPalette({ ...editPalette(), [key]: e.target.value }); $('reset-palette').disabled = !(state.format === 'feature-graphic' ? state.featurePalette : selected()?.palette); render(); });
+  for (const button of document.querySelectorAll('[data-palette]')) button.addEventListener('click', () => { setPalette(palettes[button.dataset.palette]); syncFields(); });
+  $('palette-scope').addEventListener('change', syncFields);
+  $('reset-palette').addEventListener('click', () => { if (state.format === 'feature-graphic') delete state.featurePalette; else if (selected()) delete selected().palette; syncFields(); tell('This asset uses the project palette.'); });
   for (const button of document.querySelectorAll('[data-format]')) button.addEventListener('click', () => { state.format = button.dataset.format; if (state.format === 'feature-graphic') state.selectedId = state.featureCaptureId; syncFields(); });
   $('profile').addEventListener('change', e => { state.profileId = e.target.value; const device = E.profile(state).device; if (selected()?.device !== device) state.selectedId = state.captures.find(c => c.device === device)?.id || null; syncFields(); });
   for (const id of ['layout', 'text-ratio', 'image-scale']) $(id).addEventListener('input', () => { const key = state.format === 'feature-graphic' ? 'feature-graphic' : state.profileId, config = { layout: $('layout').value, textRatio: Number($('text-ratio').value) / 100, imageScale: Number($('image-scale').value) / 100 }; if (state.format === 'screenshot' && selected() && $('layout-scope').value === 'capture') { selected().layouts ||= {}; selected().layouts[key] = config; } else state.profileOptions[key] = config; $('text-ratio-value').textContent = `${$('text-ratio').value}%`; $('image-scale-value').textContent = `${$('image-scale').value}%`; render(); });
@@ -110,7 +125,16 @@
   $('all-locales').addEventListener('click', () => { state.exportLocales = Object.keys(state.locales); syncFields(); });
   $('theme').addEventListener('click', () => { const dark = document.body.classList.toggle('dark'); $('theme').textContent = dark ? 'Light mode' : 'Dark mode'; });
   $('add-locale').addEventListener('click', () => { $('locale-code').value = ''; $('locale-dialog').showModal(); });
-  $('confirm-locale').addEventListener('click', e => { const code = $('locale-code').value.trim(); if (!/^[a-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$/.test(code) || Object.keys(state.locales).length >= 50) { e.preventDefault(); tell('Use a language tag; maximum 50 languages.', true); return; } if (!state.locales[code]) { state.locales[code] = E.emptyLocale(); for (const c of state.captures) c.copy[code] = E.emptyCopy(); } state.locale = code; if (!state.exportLocales.includes(code)) state.exportLocales.push(code); syncFields(); tell(`Add ${code} copy and, where needed, a localized UI source.`); });
+  $('confirm-locale').addEventListener('click', e => {
+    const code = $('locale-code').value.trim();
+    try {
+      const canonical = E.checkedLocale(code).toString();
+      if (!Object.hasOwn(state.locales, code) && Object.keys(state.locales).length >= 50) throw new Error('Maximum 50 languages.');
+      if (Object.keys(state.locales).some(existing => existing !== code && E.checkedLocale(existing).toString() === canonical)) throw new Error('This language already exists under an equivalent tag.');
+    } catch (error) { e.preventDefault(); tell(error.message, true); return; }
+    if (!Object.hasOwn(state.locales, code)) { state.locales[code] = E.emptyLocale(); for (const c of state.captures) c.copy[code] = E.emptyCopy(); }
+    state.locale = code; if (!state.exportLocales.includes(code)) state.exportLocales.push(code); syncFields(); tell(`Add ${code} copy and, where needed, a localized UI source.`);
+  });
   function download(blob, name) { const url = URL.createObjectURL(blob), link = document.createElement('a'); link.href = url; link.download = name; document.body.append(link); link.click(); link.remove(); setTimeout(() => URL.revokeObjectURL(url), 10000); }
   $('save-config').addEventListener('click', () => { download(new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' }), `${E.slug(state.locales[state.locale].appName)}-play-project.json`); tell('Version 2 project saved: captures, source overrides, order, layouts and export selection.'); });
   $('load-config').addEventListener('change', async e => { const file = e.target.files[0]; if (!file) return; setBusy(true); try { if (file.size > E.MAX_PROJECT_BYTES) throw new Error('Project exceeds 225 MB.'); await installProject(JSON.parse(await file.text())); tell('Project opened. Version 1 projects migrate to version 2.'); } catch (error) { tell(`Could not open project; current session unchanged: ${error.message}`, true); } finally { e.target.value = ''; setBusy(false); } });

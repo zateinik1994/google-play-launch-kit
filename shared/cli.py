@@ -1,7 +1,10 @@
 """CLI entrypoint, usable both from repo and installed skill references."""
 import argparse
 import json
+import os
+import shutil
 import sys
+import tempfile
 from pathlib import Path
 
 if __package__ in (None, ""):
@@ -17,6 +20,40 @@ def write_json(value, path=None):
         Path(path).write_text(text, encoding="utf-8")
     else:
         print(text, end="")
+
+
+def protect_inputs(output, inputs):
+    """An explicit report output must never destroy its own source artifacts."""
+    if output is None:
+        return
+    target = Path(output)
+    for source in inputs:
+        path = Path(source)
+        if target.resolve() == path.resolve() or target.exists() and path.exists() and os.path.samefile(target, path):
+            raise ValueError("Output must differ from every input file, including symlinks and hard links")
+
+
+def create_workspace(destination, package):
+    import re
+    if not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]*(?:\.[A-Za-z][A-Za-z0-9_]*)+", package):
+        raise ValueError("--package: expected an Android application ID")
+    destination = Path(destination)
+    if os.path.lexists(destination):
+        raise ValueError("Destination already exists; choose a new directory")
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    staging = Path(tempfile.mkdtemp(prefix=".playkit-init-", dir=destination.parent))
+    try:
+        for name in ("research", "metadata", "screenshots", "reports"):
+            (staging/name).mkdir()
+        write_json({"package_name": package, "locales": [], "countries": [], "features": [],
+                    "monetization": "", "note": "Fill product facts and scope before researching or publishing."}, staging/"project.json")
+        if os.path.lexists(destination):
+            raise ValueError("Destination appeared during initialization; it was left unchanged")
+        staging.rename(destination)
+    finally:
+        if staging.exists():
+            shutil.rmtree(staging)
+    return destination
 
 
 def main(argv=None):
@@ -44,19 +81,10 @@ def main(argv=None):
     args = parser.parse_args(argv)
     try:
         if args.command == "init":
-            import re
-            if not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]*(?:\.[A-Za-z][A-Za-z0-9_]*)+", args.package):
-                raise ValueError("--package: expected an Android application ID")
-            dest = Path(args.directory)
-            if dest.exists():
-                raise ValueError("Destination already exists; choose a new directory")
-            dest.mkdir(parents=True)
-            for name in ("research", "metadata", "screenshots", "reports"):
-                (dest/name).mkdir()
-            write_json({"package_name": args.package, "locales": [], "countries": [], "features": [],
-                        "monetization": "", "note": "Fill product facts and scope before researching or publishing."}, dest/"project.json")
+            dest = create_workspace(args.directory, args.package)
             write_json({"created": str(dest.resolve())})
             return 0
+        protect_inputs(args.output, [getattr(args, name) for name in ("input", "before", "after") if hasattr(args, name)])
         if args.command in {"validate", "ads-plan"}:
             data = json.loads(Path(args.input).read_text(encoding="utf-8"))
         if args.command == "validate":

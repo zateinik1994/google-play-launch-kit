@@ -42,7 +42,7 @@ python3 <путь-скилла>/references/shared/store_data.py profiles --packa
 python3 <путь-скилла>/references/shared/aso_tools.py discover --profiles research/profiles.json --seed 'habit tracker' --output research/candidates.json
 ```
 
-Он считает число документов с фразой, оставляет volume неизвестным и требует product-fit разметки. Для Google Search Keyword Planner доступен отдельный [Ads keyword-ideas](references/docs/google-ads-api.md); его объем Google Search не является объемом Google Play.
+Он считает число документов с фразой внутри отдельных полей, сохраняет значимые числа и metadata/locale/country сборщика, оставляет volume неизвестным и требует product-fit разметки. Raw список без metadata нужно самостоятельно привязать к рынку/языку. Для пользовательской речи можно взять `recurring_phrases` из [review analysis](references/docs/aso-tools.md), прочитав review IDs и проверив продуктовую релевантность. Для Google Search Keyword Planner доступен отдельный [Ads keyword-ideas](references/docs/google-ads-api.md); его объем Google Search не является объемом Google Play.
 
 Сгруппируй по намерению и размечай relevance 0–3: 0 — неподдерживаемое/нерелевантное; 1 — смежный сценарий; 2 — полезная функция; 3 — основной сценарий. Это редакционная оценка. Отдели чужие бренды и информационные запросы, не подходящие для обещания карточки.
 
@@ -60,7 +60,7 @@ python3 <путь-скилла>/references/shared/cli.py keywords research/keywo
 
 Если нужны позиции, запиши query, страну, язык, время с timezone, устройство/метод и глубину; отдели рекламу от выбранного метода учета органических результатов. Без наблюдений не рассчитывай difficulty или ожидаемый rank. Приоритет shortlist определяй product fit → качество evidence → ясность оффера → доступная проверка, а не выдуманной частотностью.
 
-После разметки банка `aso_tools.py gaps --keywords research/keyword-bank.json --listings metadata/listings.json --output research/text-gaps.json` проверяет наличие точных token phrases по полям/локалям. `text_gap` не означает свободную поисковую нишу или отсутствие индексации.
+После разметки банка `python3 <путь-скилла>/references/shared/aso_tools.py gaps --keywords research/keyword-bank.json --listings metadata/listings.json --profiles research/profiles.json --output research/text-gaps.json` проверяет точные token phrases в собственных и конкурентных полях. `--profiles` опционален и требует metadata locale/country; несовместимые контексты и отсутствующие конкурентные поля остаются неизвестными. Проверь `observations` и разреши `decision_conflict` по product evidence. `text_gap` не означает свободную поисковую нишу или отсутствие индексации.
 
 Для каждого кандидата укажи кластер, evidence, вариант использования (`title`, `shortDescription`, `fullDescription`, визуальный оффер или research-only), причину выбора/исключения и неизвестные данные. Не нужен универсальный минимум слов или заполнение всех лимитов. Если важный сценарий остался без локального evidence, расширь именно этот пробел либо обозначь гипотезу.
 
@@ -75,6 +75,8 @@ python3 <путь-скилла>/references/shared/cli.py validate metadata/listi
 ```
 
 Validator проверяет форму и пределы, а не смысл, перевод, поддержку locale или policy approval. Проверь отдельно product truth, читаемость, согласованность со скриншотами и отображение доступным способом.
+
+Для передачи нескольких локалей заполни [offline locale inventory](references/docs/readiness.md): `python3 <путь-скилла>/references/shared/readiness.py report --project project.json --listings metadata/listings.json --output reports/locale-readiness.json`. Он сопоставляет выбранные locales с текстами и optional assets/evidence; `INCOMPLETE` показывает пробелы, `CHECKLIST_RECORDED` лишь фиксирует предоставленные evidence records и не означает approval Google.
 
 Передай только артефакты нужного scope:
 

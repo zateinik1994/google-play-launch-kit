@@ -1,5 +1,6 @@
 import contextlib
 import csv
+import hashlib
 import io
 import json
 import tempfile
@@ -8,7 +9,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from shared.appstorespy import AppStoreSpy, build_request, main as provider_main, validate
-from shared.store_data import collect, rank_snapshot, normalize_reviews, CollectionError, context, main as collection_main
+from shared.store_data import collect, rank_snapshot, normalize_reviews, normalize_profile, CollectionError, context, main as collection_main
 from shared.play_reports import normalize_csv, summarize, report_object, object_url, GCSReports
 
 
@@ -29,6 +30,14 @@ class ProviderTests(unittest.TestCase):
             client.call("app", {"id":"x","unexpected":True})
         self.assertEqual(calls, [])
 
+    def test_parameter_array_cannot_be_coerced_to_an_object(self):
+        calls = []
+        client = AppStoreSpy(transport=lambda request: calls.append(request))
+        for value in ([], [["id", "com.example.app"]], "id"):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                client.call("app", value)
+        self.assertEqual(calls, [])
+
     def test_queued_country_missing_and_partial_are_explicit(self):
         for status, expected in ((202,"queued"),(204,"no_country_data"),(206,"partial")):
             client=AppStoreSpy(transport=lambda request: (status,None,{"X-Cost":"1"}))
@@ -40,6 +49,15 @@ class ProviderTests(unittest.TestCase):
             with patch("shared.appstorespy.AppStoreSpy") as client, contextlib.redirect_stderr(io.StringIO()):
                 self.assertEqual(provider_main(["countries","--execute","--output",str(output)]),2)
                 client.assert_not_called()
+
+    def test_dangling_output_blocks_paid_request(self):
+        with tempfile.TemporaryDirectory() as temp:
+            output = Path(temp)/"out.json"
+            output.symlink_to(Path(temp)/"missing.json")
+            with patch("shared.appstorespy.AppStoreSpy") as client, contextlib.redirect_stderr(io.StringIO()):
+                self.assertEqual(provider_main(["countries", "--execute", "--output", str(output)]), 2)
+                client.assert_not_called()
+            self.assertFalse((Path(temp)/"missing.json").exists())
 
     def test_plan_never_loads_key_or_calls_provider(self):
         with patch("shared.appstorespy.AppStoreSpy") as client, contextlib.redirect_stdout(io.StringIO()) as stdout:
@@ -91,8 +109,47 @@ class PublicTests(unittest.TestCase):
             def search(self,*args):raise AssertionError("No call expected")
         with self.assertRaises(ValueError):collect(Provider(),"search",locale="en-GB",country="GB",query="habit",limit=100)
 
+    def test_malformed_profile_cannot_be_saved_as_observed_competitor(self):
+        base = {"title": "Habit Tracker", "summary": "Daily habits", "description": "Track routines"}
+        for field, value in (("appId", "com.example.other"), ("title", ""), ("summary", []), ("ratings", True), ("score", float("nan")), ("price", -1), ("screenshots", "https://example.com/image.png")):
+            with self.subTest(field=field), self.assertRaises(CollectionError):
+                normalize_profile(dict(base, **{field: value}), "com.example.app")
+        sparse = normalize_profile(base, "com.example.app")
+        self.assertIsNone(sparse["rating_count"])
+        self.assertIsNone(sparse["screenshots"])
+        self.assertIsNone(normalize_profile(dict(base, screenshots=None), "com.example.app")["screenshots"])
+
+    def test_invalid_operation_and_noninteger_limit_do_not_call_provider(self):
+        class Provider:
+            def search(self, *args): raise AssertionError("No call expected")
+            def reviews(self, *args): raise AssertionError("No call expected")
+        with self.assertRaises(ValueError):
+            collect(Provider(), "invalid", locale="en-GB", country="GB", packages=["com.example.app"])
+        for value in (True, 1.5):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                collect(Provider(), "search", locale="en-GB", country="GB", query="habit", limit=value)
+
 
 class ReportTests(unittest.TestCase):
+    def test_metric_mapping_cannot_reuse_one_source_column(self):
+        raw = "Day,Package name,Users\n2026-10-01,com.example.app,100\n"
+        with self.assertRaisesRegex(ValueError, "one normalized field"):
+            normalize_csv(raw, mapping={"date": "Day", "visitors": "Users", "acquisitions": "Users"})
+        for mapping in ([], {"visitors": ["Users"]}):
+            with self.subTest(mapping=mapping), self.assertRaises(ValueError):
+                normalize_csv(raw, mapping=mapping)
+
+    def test_normalization_provenance_and_large_counts(self):
+        raw = "Date,Package name,Store listing visitors,Store listing acquisitions\n2026-10-01,com.example.app,100,8\n".encode("utf-16")
+        result = normalize_csv(raw)
+        meta = result["metadata"]
+        self.assertEqual(meta["input_sha256"], hashlib.sha256(raw).hexdigest())
+        self.assertEqual(meta["input_encoding"], "utf-16")
+        self.assertEqual(meta["column_mapping"]["visitors"], "Store listing visitors")
+        self.assertIn("Date", meta["source_columns"])
+        with self.assertRaises(ValueError):
+            normalize_csv("Date,Package name,visitors,acquisitions\n2026-10-01,com.example.app," + str(2**63) + ",8\n")
+
     def test_download_does_not_forward_credentials_via_redirects(self):
         class Response:
             status_code = 200

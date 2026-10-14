@@ -18,6 +18,8 @@ python3 shared/play_reports.py summary --input output/performance.json --output 
 
 UTF-8/BOM и UTF-16/BOM распознаются; при необходимости задайте `--encoding`. Для переведенных или иначе названных колонок передайте `--mapping` JSON вида `{"date":"Дата","package_name":"Название пакета","visitors":"Посетители","acquisitions":"Привлечения"}`. Пустые счетчики сохраняются неизвестными. Ошибочный package, дубликаты и сдвинутые CSV-строки не агрегируются.
 
+Каждый исходный столбец может соответствовать только одному normalized field: нельзя получить visits и acquisitions из одной колонки. Metadata сохраняет SHA256 исходных bytes, encoding, заголовки и фактический mapping; CLI добавляет путь исходника и время нормализации. Сохраните downloaded sidecar/описание Console filters рядом: один хеш не подтверждает источник или полноту выгрузки.
+
 Нормализованный ряд сохраняет date, package, country, language, store_listing, install_state, device_form_factor, traffic_source, search_term, utm_source, utm_campaign и metric_family. Summary разделяет все эти измерения. Отрицательные/дробные/нечисловые counts, неверная дата/package и duplicate context отклоняются даже при чтении вручную подготовленного JSON.
 
 ## Семантика

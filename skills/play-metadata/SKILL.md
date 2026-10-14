@@ -70,9 +70,17 @@ python3 <skill-directory>/references/shared/play_release.py apply --config relea
 
 Без `--live` команды offline. Server validate ставит assets/AAB/tracks во временный edit, проверяет и удаляет его без commit; это отличается от чтения. Live apply резервирует свежие text/details/tracks и оригинальные image binaries с проверкой server hashes **до** первого upload/PUT/DELETE. Ошибка backup блокирует запись. Удаление locale резервирует ее assets; reorder повторно загружает сохраненные оригиналы в заданном порядке. Phone/tablet/icon/feature проходят canonical техническую image validation; реальное device/policy QA и серверная проверка нужны для всех assets.
 
-Используй существующее разрешение пользователя на конкретный config/операции. До commit проверь release readiness, signing/build/SDK пригодность и Console declarations по доступным данным. Tool не обходит testing/production access, review и publishing settings. При unknown commit проверь Console и `transaction.json` до повторного запуска. `rollback.json` — готовый config нового восстановительного edit, не автоматический undo: сначала проверь план и существующее поручение на восстановление.
+Используй существующее разрешение пользователя на конкретный config/операции. До commit проверь release readiness, signing/build/SDK пригодность и Console declarations по доступным данным. Выбери новую backup-папку: существующий путь блокирует запуск до edit. Tool не обходит testing/production access, review и publishing settings. При unknown commit проверь Console и `transaction.json` до повторного запуска. `rollback.json` — готовый config нового восстановительного edit, не автоматический undo: сначала проверь план и существующее поручение на восстановление. Он явно очищает video, если его не было в исходной карточке; raw text backup требует отдельного `"video":""` для этого случая.
 
 Результат включает backup directory, edit ID, реальный uploaded versionCode, переданные track statuses/fractions и фактический committed/validated-only/unknown status. Notes ограничены 500 Unicode code points на locale, server подтверждает поддержку. Для подтверждения delivery после commit проверь track/карточку; production не считается видимым только по ответу API. Data safety, custom listings/experiments и Google Ads используют другие интерфейсы; unsupported API endpoints не выдумывай.
+
+Для review/publishing readback используй `release-state`: GET официального `applications.tracks.releases.list` **вне edit**. Сопоставь activeArtifacts/versionCode с отправленным AAB, сохрани source/time и точный lifecycleState:
+
+```bash
+python3 <skill-directory>/references/shared/play_release.py release-state --package com.example.app --track production --live --output release-state.json
+```
+
+Без `--live` это offline read plan. Максимум 20 non-obsolete summaries не является полной историей; пустой ответ, неизвестный/unspecified state не подтверждают approval. PUBLISHED включает partial/ halted release и не доказывает полный rollout или видимость локализованной карточки. Для pending review/publishing действий нужен реальный Console workflow; readback их не выполняет.
 
 ## Data safety из подготовленного CSV
 
@@ -83,4 +91,4 @@ python3 <skill-directory>/references/shared/play_safety.py plan --package com.ex
 python3 <skill-directory>/references/shared/play_safety.py apply --package com.example.app --csv data-safety.csv --before-csv before-data-safety.csv --backup-directory outputs/safety-01 --live
 ```
 
-Plan и apply без --live offline. Live требует текущий before CSV, потому что у метода нет declaration GET/validateOnly; before/proposed/receipt сохраняются до POST. Синтаксическая проверка не подтверждает conditional полноту или правдивость SDK declarations. Учитывай уже данное разрешение на конкретную запись. Acceptance называется submitted; policy review/видимость labels проверяются отдельно. При unknown outcome сначала проверь Console, не повторяй POST автоматически.
+Plan и apply без --live offline. Live требует текущий before CSV, потому что у метода нет declaration GET/validateOnly; before/proposed/receipt сохраняются до POST из того же снимка, который сравнен и отправлен. Одинаковые CSV дают unchanged без credentials/POST. Синтаксическая проверка не подтверждает conditional полноту или правдивость SDK declarations. Учитывай уже данное разрешение на конкретную запись. Acceptance называется submitted; policy review/видимость labels проверяются отдельно. При unknown outcome сначала проверь Console, не повторяй POST автоматически.

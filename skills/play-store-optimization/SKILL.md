@@ -21,6 +21,8 @@ python3 <путь-скилла>/references/shared/cli.py validate metadata/listi
 
 Дай таблицу field/locale → проблема и evidence → исправление → способ проверки. Для предложенных правок покажи before/after и rationale. Если готовится загрузка, optional offline diff доступен через `references/shared/play_api.py plan --input listings.json --current before.json` по [API guide](references/docs/play-api.md); без baseline он не знает текущих значений магазина. Аудит не делает commit.
 
+Если поручение включает готовность запуска или locale coverage, используй [readiness inventory](references/docs/readiness.md): `python3 <путь-скилла>/references/shared/readiness.py report --project project.json --listings metadata/listings.json --output reports/readiness.json`. Optional evidence должно относиться к выбранному package/release и содержать ссылки/дату проверки; записанный checklist не подтверждает policy approval. Для одного текстового аудита полный launch checklist не требуется.
+
 ## Отзывы
 
 Сначала установи происхождение и объем выгрузки, период, языки, версии и доступные фильтры. [Collector](references/docs/aso-data-api.md) загружает bounded выборку newest reviews и записывает совместимый CSV с metadata sidecar; AppStoreSpy предоставляет альтернативный источник. Сохрани raw файл; подготовь CSV `review_id,rating,text`, отдельно отделив нужные version/country/period. Дополнительные поля можно хранить в исходнике, но анализатор тем не фильтрует по ним. При отсутствии этих полей ограничения выборки остаются неизвестными.
@@ -40,6 +42,8 @@ python3 <путь-скилла>/references/shared/cli.py reviews research/review
 ```
 
 Средняя оценка в CSV — среднее выбранных записей, не публичный Play rating. Словарь тем работает для EN/RU и не является sentiment model: метки пересекаются и ошибаются, их сумма может превышать число отзывов. Для других языков подготовь ручной/доступный агенту анализ с явным методом, сохраняя оригиналы. Прочитай низкие оценки и примеры положительных сценариев; проверь контекст, отрицания и известные дефекты.
+
+CLI возвращает `topic_evidence`, EN/RU `feature_request_cues` и `recurring_phrases` с review IDs. Повторы фразы внутри одного отзыва считаются один раз; числа сохраняются. Optional `created_at,app_version` остаются в evidence, но не фильтруют набор автоматически. Используй cues как очередь ручного чтения: отрицание или цитата могут менять смысл. Расчет severity и подтверждение feature request остаются редакционным решением по реальным последствиям, а не автоматическим score.
 
 Раздели product bugs, billing/trust, UX, mismatch обещания карточки и новые feature requests. Для каждой важной темы дай count/denominator, подтверждающие review IDs и короткие выдержки, severity, текущую feature evidence и рекомендуемый адресат изменения. Просьба о несуществующей функции не превращается в keyword карточки. Частота темы в удобной выборке не является распространенностью среди всех пользователей.
 

@@ -13,7 +13,7 @@ from unittest.mock import patch
 
 from shared.google_ads import (
     ADS_FIELDS, GOAL, INSTALL_GOAL, AdsADCTransport, AdsAPIError, AdsError, GoogleAds, campaign_request,
-    customer_id, main, normalize_report, report_queries, dimension_queries, keyword_ideas_request, validate_config, write_report,
+    customer_id, main, normalize_report, report_queries, dimension_queries, keyword_ideas_request, validate_config, write_report, write_report_bundle,
 )
 
 
@@ -248,6 +248,60 @@ def row(day="2026-10-01", campaign="77", *, cost="1234567", impressions="100", c
 
 
 class ReportTests(unittest.TestCase):
+    def test_metadata_checks_account_and_exact_action_identity(self):
+        class Metadata:
+            def __init__(self, action_rows, account_id=CUSTOMER):
+                self.action_rows, self.account_id = action_rows, account_id
+            def request(self, method, url, *, payload):
+                if 'FROM conversion_action' in payload['query']:
+                    return {'results': self.action_rows}
+                return {'results': [{'customer': {'id': self.account_id, 'currencyCode': 'USD', 'timeZone': 'UTC'}}]}
+        for rows in ([{}], [{'conversionAction': {'resourceName': ACTION.replace('/987654321', '/1')}}],
+                     [{'conversionAction': {'resourceName': ACTION}}] * 2):
+            with self.subTest(rows=rows), self.assertRaisesRegex(AdsError, 'selected action'):
+                GoogleAds(CUSTOMER, 'v25', Metadata(rows)).report_metadata('2026-10-01', '2026-10-10', ACTION)
+        with self.assertRaisesRegex(AdsError, 'customer ID'):
+            GoogleAds(CUSTOMER, 'v25', Metadata([], '9999999999')).account()
+        missing = GoogleAds(CUSTOMER, 'v25', Metadata([])).report_metadata('2026-10-01', '2026-10-10', ACTION)
+        self.assertFalse(missing['conversionSettingsVerified'])
+
+    def test_metadata_invalid_scope_blocks_before_transport(self):
+        class NoIO:
+            def request(self, *args, **kwargs):
+                raise AssertionError('Invalid metadata request must not contact Ads')
+        client = GoogleAds(CUSTOMER, 'v25', NoIO())
+        for start, action, package in [('bad', ACTION, None), ('2026-10-01', 'bad', None),
+                                       ('2026-10-01', ACTION, "x'; DROP")]:
+            with self.assertRaises(ValueError):
+                client.report_metadata(start, '2026-10-10', action, package=package)
+
+    def test_failed_csv_serialization_never_exposes_partial_report(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'report.csv'
+            rows = normalize_report([row()], [], ACTION) + [dict(unexpected='bad')]
+            with self.assertRaises(ValueError):
+                write_report(path, rows)
+            self.assertFalse(path.exists())
+            self.assertEqual(list(Path(directory).iterdir()), [])
+
+    def test_report_bundle_failure_cleans_its_metadata_and_preserves_other_outputs(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'report.csv'
+            rows = normalize_report([row()], [], ACTION)
+            original_link = __import__('os').link
+            def link(source, destination):
+                if Path(destination) == path:
+                    raise OSError('Disk unavailable publishing CSV')
+                return original_link(source, destination)
+            with patch('shared.google_ads.os.link', side_effect=link), self.assertRaises(OSError):
+                write_report_bundle(path, rows, {'source': 'test'})
+            self.assertEqual(list(Path(directory).iterdir()), [])
+            sidecar = path.with_suffix('.csv.metadata.json'); sidecar.write_text('existing')
+            with self.assertRaises(FileExistsError):
+                write_report_bundle(path, rows, {'source': 'test'})
+            self.assertEqual(sidecar.read_text(), 'existing')
+            self.assertFalse(path.exists())
+
     def test_app_and_campaign_filters_apply_to_both_queries(self):
         queries = report_queries("2026-10-01", "2026-10-10", ACTION, package="com.example.focus", campaign_ids=["77"])
         for query in queries:
@@ -362,6 +416,37 @@ class ReportTests(unittest.TestCase):
 
 
 class CLITests(unittest.TestCase):
+    def test_dangling_outputs_block_reports_and_keyword_ideas_before_credentials(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output, missing = Path(directory)/"report.csv", Path(directory)/"missing.csv"
+            output.symlink_to(missing)
+            for command in ("report", "geo-report", "asset-report"):
+                args = [command, "--customer", CUSTOMER, "--api-version", "v25",
+                        "--start-date", "2026-10-01", "--end-date", "2026-10-10",
+                        "--conversion-action", ACTION, "--output", str(output)]
+                with self.subTest(command=command), patch("shared.google_ads.AdsADCTransport") as transport, contextlib.redirect_stderr(io.StringIO()):
+                    self.assertEqual(main(args), 2)
+                    transport.assert_not_called()
+            config = Path(directory)/"ideas.json"
+            config.write_text(json.dumps({"seeds": ["focus timer"], "language_resource": "languageConstants/1000",
+                                          "country_resources": ["geoTargetConstants/2840"]}))
+            with patch("shared.google_ads.AdsADCTransport") as transport, contextlib.redirect_stderr(io.StringIO()):
+                self.assertEqual(main(["keyword-ideas", "--customer", CUSTOMER, "--api-version", "v25",
+                                       "--config", str(config), "--output", str(output)]), 2)
+                transport.assert_not_called()
+            self.assertTrue(output.is_symlink())
+            self.assertFalse(missing.exists())
+            new_csv = Path(directory)/"new.csv"
+            metadata = new_csv.with_suffix(".csv.metadata.json")
+            metadata.symlink_to(Path(directory)/"missing-metadata.json")
+            with patch("shared.google_ads.AdsADCTransport") as transport, contextlib.redirect_stderr(io.StringIO()):
+                self.assertEqual(main(["report", "--customer", CUSTOMER, "--api-version", "v25",
+                                       "--start-date", "2026-10-01", "--end-date", "2026-10-10",
+                                       "--conversion-action", ACTION, "--output", str(new_csv)]), 2)
+                transport.assert_not_called()
+            self.assertFalse(new_csv.exists())
+            self.assertTrue(metadata.is_symlink())
+
     def test_existing_report_destination_blocks_before_credentials_or_api(self):
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory) / "existing.json"
@@ -391,7 +476,7 @@ class CLITests(unittest.TestCase):
                         return {"results": [{"geoTargetConstant": {"resourceName": "geoTargetConstants/2840", "status": "ENABLED", "targetType": "Country"}}]}
                     if "FROM language_constant" in payload["query"]:
                         return {"results": [{"languageConstant": {"resourceName": "languageConstants/1000"}}]}
-                    return {"results": [{"customer": {"currencyCode": "USD", "timeZone": "UTC"}}]}
+                    return {"results": [{"customer": {"id": CUSTOMER, "currencyCode": "USD", "timeZone": "UTC"}}]}
                 if not url.endswith(f"customers/{CUSTOMER}:generateKeywordIdeas"):
                     raise AssertionError(url)
                 if payload.get("pageToken"):
@@ -450,7 +535,7 @@ class CLITests(unittest.TestCase):
                 if not url.endswith(":search"):
                     raise AssertionError("Reports must not mutate")
                 if " FROM customer " in payload["query"]:
-                    return {"results": [{"customer": {"currencyCode": "USD", "timeZone": "UTC"}}]}
+                    return {"results": [{"customer": {"id": CUSTOMER, "currencyCode": "USD", "timeZone": "UTC"}}]}
                 return {"results": []}
         for command in ("geo-report", "asset-report"):
             with self.subTest(command=command), tempfile.TemporaryDirectory() as directory:

@@ -74,6 +74,8 @@ def build_request(operation, params=None, body=None):
     if operation not in SCHEMA["operations"]:
         raise ValueError("Unknown Android AppStoreSpy operation")
     spec = SCHEMA["operations"][operation]
+    if params is not None and not isinstance(params, dict):
+        raise ValueError("Endpoint parameters must be a JSON object")
     params = dict(params or {})
     unknown = set(params) - set(spec["parameters"])
     if unknown:
@@ -166,7 +168,7 @@ def main(argv=None):
     try:
         if args.output:
             output = Path(args.output)
-            if output.exists():
+            if output.exists() or output.is_symlink():
                 raise ValueError("Output already exists; no provider request made")
             output.parent.mkdir(parents=True, exist_ok=True)
         params = json.loads(Path(args.params).read_text()) if args.params else {}

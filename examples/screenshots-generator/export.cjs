@@ -28,7 +28,7 @@ Usage: node export.cjs --project saved-project.json --output new-directory
   --zip                    Include assets.zip in the destination
   --browser-executable /path/to/chromium   Optional installed browser
 Output must not exist. Real embedded captures are required; no uploads.
-Install optional renderer: npm install; npx playwright install chromium
+Install optional renderer: npm ci --ignore-scripts; npx playwright install chromium
 `;
 async function exists(file) { try { await fs.lstat(file); return true; } catch (error) { if (error.code === 'ENOENT') return false; throw error; } }
 async function main(argv) {
@@ -38,7 +38,7 @@ async function main(argv) {
   const stat = await fs.stat(input); if (!stat.isFile() || stat.size > E.MAX_PROJECT_BYTES) throw new Error('Project must be a JSON file no larger than 225 MB.');
   const project = JSON.parse(await fs.readFile(input, 'utf8'));
   let chromium;
-  try { ({ chromium } = require('playwright')); } catch { throw new Error('Optional Playwright dependency is missing. Run npm install in the generator directory, then npx playwright install chromium.'); }
+  try { ({ chromium } = require('playwright')); } catch { throw new Error('Optional Playwright dependency is missing. Run npm ci --ignore-scripts in the generator directory, then npx playwright install chromium.'); }
   const names = new Map([['/', 'index.html'], ['/index.html', 'index.html'], ['/engine.js', 'engine.js'], ['/studio.js', 'studio.js'], ['/studio.css', 'studio.css']]);
   const server = http.createServer(async (req, res) => {
     const file = names.get(req.url);

@@ -25,6 +25,15 @@ description: Review Google Play release readiness, SDK data flows and rejection 
 
 Для подписок проверяй весь путь от listing/onboarding до paywall и management: что пользователь получает, фактически списываемую цену/период, trial → paid, доступ без покупки если он есть, локализованные условия и cancellation. Сравнивай с реальными products/offers и eligibility, а не только с нарисованным экраном. Рабочие случаи и [App access template](references/docs/play-review-guide.md#шаблон-app-access) находятся в guide.
 
+Для сводного provided-evidence checklist и locale inventory прочитай [readiness workflow](references/docs/readiness.md). Bundled CLI работает offline и связывает записи с выбранным package/release:
+
+```bash
+python3 <skill-directory>/references/shared/readiness.py template --package com.example.app --release-reference "versionCode 42, production" --output workspace/app/readiness-evidence.json
+python3 <skill-directory>/references/shared/readiness.py report --project workspace/app/project.json --listings workspace/app/listings.json --assets workspace/app/assets.json --evidence workspace/app/readiness-evidence.json --require-complete --output workspace/app/readiness.json
+```
+
+Заполняй passed только подтвержденными evidence reference и checked_at с timezone; failed/not-applicable требуют объяснения. `INCOMPLETE` показывает пробелы, `CHECKLIST_RECORDED` означает записанный checklist: программа не проверяет документы по ссылкам, реальное состояние аккаунта, policy approval или разрешение публикации. Project release_reference должен совпадать с evidence; для частичного аудита опусти недоступные listings/assets/evidence и сохрани pending checks.
+
 Не скрывай реальные функции от рецензента, не предлагай обходы review. Исправление текста/документа в авторизованном scope выполняй без отдельного согласования; изменение поведения app, declarations или submission должно соответствовать поручению пользователя.
 
 ## Data safety CSV и API
@@ -41,7 +50,7 @@ python3 <skill-directory>/references/shared/play_safety.py apply --package com.e
 
 Первые две команды offline и не загружают credentials. Проверка формы CSV не подтверждает полноту conditional questions или достоверность декларации. Подготовь конкретный файл, сверку ответов с evidence и существенные изменения относительно before. Используй уже данное разрешение на выбранное declaration; если его нет, закончи reviewable файл/сравнение перед запросом согласования.
 
-Live использует `applications.dataSafety` с `safetyLabels` — **отдельный немедленный POST вне edit**. У метода нет declaration GET или validateOnly: свежесть/package prior CSV подтверждается через Console/контекст владельца. `--before-csv` и новая backup-папка обязательны; CLI сохраняет before/proposed CSV и receipt до записи. Он не объединяет Data safety с AAB/listing commit и не откатывает ее при ошибке релиза.
+Live использует `applications.dataSafety` с `safetyLabels` — **отдельный немедленный POST вне edit**. У метода нет declaration GET или validateOnly: свежесть/package prior CSV подтверждается через Console/контекст владельца. `--before-csv` и новая backup-папка обязательны; CLI сохраняет before/proposed CSV и receipt до записи. Comparison, архив и отправка используют один снимок прочитанных файлов; одинаковые CSV дают `unchanged` без credentials/POST. Он не объединяет Data safety с AAB/listing commit и не откатывает ее при ошибке релиза.
 
 Результат `submitted` означает acceptance API, а не policy approval или видимые labels. Проверь declaration/review/public state в Console, если доступ предоставлен. При `submission-outcome-unknown`, таймауте или failed receipt после подтвержденного ответа сначала сверь состояние; повторение автоматически запрещено. Перед восстановлением нужна новая явная запись сохраненного CSV в пределах поручения и актуальный prior export.
 
@@ -50,6 +59,14 @@ Live использует `applications.dataSafety` с `safetyLabels` — **от
 Следуй [rejection workflow и шаблону ответа](references/docs/play-review-guide.md#если-получен-rejection-или-другое-enforcement). Сопоставь каждый пункт письма с воспроизводимым сценарием и текущим правилом, затем подготовь diff/evidence и повторную проверку. Различай исправление с resubmission и обоснованную appeal на ошибочное решение. Проверяй соответствующие internal/closed/open/production tracks: старый нарушающий bundle может остаться активным.
 
 Повторный rejection не доказывает скрытую причину отказа: проверь что отправлена исправленная сборка, декларации соответствуют ей, reviewer access работает и указанные artifacts относятся к нужной версии. При недостающем объяснении подготовь предметный запрос по case ID. Ответ и appeal сохраняй как черновик; отправка выполняется только в пределах поручения владельца.
+
+Если предоставлен API-доступ, для lifecycle нужного track используй bundled GET без создания edit:
+
+```bash
+python3 <skill-directory>/references/shared/play_release.py release-state --package com.example.app --track production --live --output workspace/app/release-state.json
+```
+
+Прочитай [контракт release-state](references/docs/play-api.md#reviewpublishing-state-без-edit), сопоставь active versionCode и сохрани source/time. IN_REVIEW, NOT_APPROVED, APPROVED_NOT_PUBLISHED и PUBLISHED различаются; последний включает partial/halted release. Максимум 20 non-obsolete summaries не является полной историей; неизвестный/unspecified state не означает approval. API не заменяет оригинальное rejection письмо, причины policy finding или проверку публичной карточки. Без `--live` получишь только offline read plan.
 
 ## Результат
 

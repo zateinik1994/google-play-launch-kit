@@ -12,6 +12,7 @@ ROOT = Path(__file__).resolve().parent.parent
 INSTALLER = ROOT/"scripts/install_skills.py"
 
 from scripts.install_skills import runtime_status
+from scripts.check_knowledge import check_markdown_links
 from test_validate_images import png
 
 
@@ -66,6 +67,8 @@ class InstallerTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
             for path in dest.rglob("*"):
                 self.assertFalse(path.is_symlink(), str(path))
+            for page in dest.rglob("*.md"):
+                self.assertEqual(check_markdown_links(page), [], str(page))
             cli = dest/"play-aso-research/references/shared/cli.py"
             input_file = Path(temp)/"listing.json"
             input_file.write_text(json.dumps({"en-GB": {"title": "Focus", "shortDescription": "Focus sessions", "fullDescription": "Start a timer."}}))

@@ -12,7 +12,7 @@
 
 | Проверка | Актуальное правило / действие |
 | --- | --- |
-| Package / version | Package name уникален и постоянен; новый выпуск требует большего `versionCode` |
+| Package / version | Package name уникален и постоянен; новый build для обновления устройств получает больший `versionCode`. Уже загруженную версию можно продвигать между tracks без повторного upload |
 | Signing | Проверить release signing и Play App Signing, различать upload key и app signing key |
 | Target API | С 2026-08-31 новые phone/tablet apps и updates: Android 16 / API 36+; Wear OS и Automotive 35+, TV и XR 34+ |
 | Existing availability | Для уже опубликованного mobile app отдельный порог API 35; это не разрешение прислать новый update с API 35 |
@@ -20,6 +20,8 @@
 | Новые personal accounts | Созданные после 2023-11-13: closed test, минимум 12 opted-in testers непрерывно 14 дней до заявки на production access |
 
 Package/version/signing: [Create and set up your app](https://support.google.com/googleplay/android-developer/answer/9859152?hl=en). Target и исключения: [Target API requirements](https://support.google.com/googleplay/android-developer/answer/11926878?hl=en). Тестирование: [New personal accounts](https://support.google.com/googleplay/android-developer/answer/14151465?hl=en-en).
+
+Нельзя заново загрузить другой APK/AAB с уже использованным versionCode; рост версии защищает от downgrade. Это отличается от повторного использования существующего артефакта в releases нужного track. Источники: [Android versioning](https://developer.android.com/studio/publish/versioning), [Track Release](https://developers.google.com/android-publisher/api-ref/rest/v3/edits.tracks).
 
 **Даты, которые нельзя считать постоянными.** На дату проверки target-policy допускает запрос extension до 2026-11-01; наличие/применимость проверять в Notifications приложения. А текущая [16 KB compatibility guidance](https://developer.android.com/guide/practices/page-sizes) указывает 2027-02-01 как дату блокировки несовместимых updates для API 35+ на 64-bit devices. Это снимок источника, не утверждение о статусе всех аккаунтов. Не брать старый deadline из блогов; перед выпуском заново открыть guidance и warning конкретной сборки.
 
@@ -46,6 +48,8 @@ form answer: collected / shared / optional / required / exception + обосно
 ```
 
 Автоматический scanner не знает всех серверных потоков, remote config и contracts. Если поведение SDK неизвестно, отметить `unverified` и запросить факты у владельца, не выбирать «не собираем» по умолчанию.
+
+Для поручения на декларацию используйте [Data safety CSV workflow](play-api.md#data-safety-отдельный-официальный-post): offline syntax plan, сверка с evidence и отдельный `applications.dataSafety` POST. У метода нет declaration read/validateOnly, поэтому prior CSV предоставляет владелец через Console; архив и payload связаны SHA-256 одного снимка. Acceptance API не подтверждает полноту анкеты, policy approval или видимость labels.
 
 ## Permissions
 
@@ -89,6 +93,8 @@ form answer: collected / shared / optional / required / exception + обосно
 Пример: «`unverified / risk`: analytics SDK присутствует, но data flows и Data safety ответы не предоставлены; сверить SDK config и outgoing payloads, затем обновить таблицу и форму».
 
 После исправлений сверить Publishing overview, активные tracks, предупреждения релизной сборки и план выпуска. Отправку на review и rollout выполнить только в пределах поручения владельца. [Prepare and roll out a release](https://support.google.com/googleplay/android-developer/answer/9859348?hl=en) описывает текущий Console workflow.
+
+При API-доступе [release-state](play-api.md#reviewpublishing-state-без-edit) читает lifecycle нужного track через официальный GET вне edit. Сопоставляйте active versionCode, а не только releaseName; NOT_APPROVED не содержит причину rejection. PUBLISHED включает partial/halted release и не подтверждает публичную карточку всех рынков. До 20 non-obsolete summaries не заменяют полный журнал или исходное уведомление enforcement.
 
 ## Шаблон App access
 

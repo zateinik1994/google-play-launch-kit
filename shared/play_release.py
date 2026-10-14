@@ -108,13 +108,13 @@ def validate_config(config, directory='.'):
     for index, item in enumerate(images):
         require(isinstance(item, dict) and not set(item) - {'language', 'image_type', 'operation', 'files', 'ids', 'all'}, 'Unknown image operation fields')
         locale(item.get('language'))
-        require(item.get('image_type') in IMAGE_TYPES, 'Unsupported AppImageType')
+        require(isinstance(item.get('image_type'), str) and item['image_type'] in IMAGE_TYPES, 'Unsupported AppImageType')
         key = (item['language'], item['image_type'])
         require(item['language'] not in config.get('delete_listings', []), 'Cannot edit images of a deleted locale')
         require(key not in seen, 'Use one operation per image language/type')
         seen.add(key)
         operation = item.get('operation')
-        require(operation in {'append', 'replace', 'delete', 'reorder'}, 'Image operation must be append/replace/delete/reorder')
+        require(isinstance(operation, str) and operation in {'append', 'replace', 'delete', 'reorder'}, 'Image operation must be append/replace/delete/reorder')
         if operation in {'append', 'replace'}:
             require(set(item) == {'language', 'image_type', 'operation', 'files'} and isinstance(item['files'], list) and bool(item['files']), 'append/replace requires non-empty ordered files only')
             maximum = 1 if item['image_type'] in {'icon', 'featureGraphic', 'tvBanner'} else 8
@@ -137,9 +137,12 @@ def validate_config(config, directory='.'):
         for release in track['releases']:
             require(isinstance(release, dict) and not set(release) - RELEASE_FIELDS, 'Unsupported release fields')
             status = release.get('status')
-            require(status in {'draft', 'inProgress', 'halted', 'completed'}, 'Specify explicit release status')
+            require(isinstance(status, str) and status in {'draft', 'inProgress', 'halted', 'completed'}, 'Specify explicit release status')
             codes = release.get('versionCodes')
             require(isinstance(codes, list) and bool(codes) and all(isinstance(code, str) and (code == '$uploaded' and 'bundle' in config or code.isascii() and code.isdigit() and 1 <= int(code) <= 2100000000) for code in codes) and len(set(codes)) == len(codes), 'versionCodes: unique positive strings, or $uploaded with bundle')
+            expected = config.get('bundle', {}).get('expected_version_code')
+            resolved_codes = [str(expected) if code == '$uploaded' and expected is not None else code if code == '$uploaded' else str(int(code)) for code in codes]
+            require(len(set(resolved_codes)) == len(resolved_codes), 'versionCodes must be numerically unique, including expected uploaded version')
             if status == 'inProgress':
                 require('userFraction' in release, 'inProgress requires explicit userFraction')
             if 'userFraction' in release:
@@ -236,6 +239,31 @@ class ReleasePublisher(PlayPublisher):
         with self.new_edit() as edit:
             return self.snapshot_edit(edit.id, groups)
 
+    def release_state(self, track):
+        """Read review/publication summaries without creating an invalidating edit."""
+        require(isinstance(track, str) and bool(track) and not any(c.isspace() or c in '/?#' for c in track), 'Use an exact API track identifier')
+        endpoint = f'{API_ROOT}/applications/{quote(self.package_name, safe="")}/tracks/{quote(track, safe="")}/releases'
+        response = self.transport.request('GET', endpoint)
+        releases = response.get('releases', [])
+        if not isinstance(releases, list) or len(releases) > 20:
+            raise PlayError('Release state response has invalid releases; no state confirmed')
+        summaries = []
+        for release in releases:
+            if not isinstance(release, dict) or release.get('track') != track:
+                raise PlayError('Release state summary has an invalid or different track')
+            name = release.get('releaseName', '')
+            state = release.get('releaseLifecycleState', 'RELEASE_LIFECYCLE_STATE_UNSPECIFIED')
+            artifacts = release.get('activeArtifacts', [])
+            if not isinstance(name, str) or not isinstance(state, str) or not state or not isinstance(artifacts, list):
+                raise PlayError('Release state summary has invalid fields')
+            if any(not isinstance(artifact, dict) or type(artifact.get('versionCode')) is not int or not 1 <= artifact['versionCode'] <= 2100000000 for artifact in artifacts):
+                raise PlayError('Release state summary has invalid active versionCodes')
+            summaries.append(dict(release, releaseName=name, releaseLifecycleState=state, activeArtifacts=artifacts))
+        return {'status': 'live-read', 'package_name': self.package_name, 'track': track, 'releases': summaries,
+                'source': 'Android Publisher applications.tracks.releases.list', 'endpoint': endpoint,
+                'retrieved_at_utc': datetime.now(timezone.utc).isoformat(), 'maximum_releases': 20,
+                'note': 'No edit created. Excludes obsolete releases; not a full release history. PUBLISHED includes partial and halted releases, and does not prove store listing visibility for a market/locale.'}
+
     def backup(self, snapshot, directory, desired):
         directory = Path(directory)
         directory.mkdir(parents=True, exist_ok=False)
@@ -244,7 +272,10 @@ class ReleasePublisher(PlayPublisher):
         affected_locales = set(desired.get('listings', {})) | set(desired.get('delete_listings', []))
         if affected_locales:
             # Do not invent old values for locales that did not previously exist.
-            rollback['listings'] = {lang: snapshot['listings'][lang] for lang in affected_locales if lang in snapshot['listings']}
+            # An omitted optional video preserves its current value during apply.
+            # Restore absence explicitly, so adding the first video is reversible.
+            rollback['listings'] = {lang: dict(snapshot['listings'][lang], video=snapshot['listings'][lang].get('video', ''))
+                                    for lang in affected_locales if lang in snapshot['listings']}
             if not rollback['listings']:
                 del rollback['listings']
             added = set(desired.get('listings', {})) - set(snapshot['listings'])
@@ -312,6 +343,8 @@ class ReleasePublisher(PlayPublisher):
         prepared = validate_config(config, directory)
         require(prepared['package_name'] == self.package_name, 'Config package_name differs from the Publisher client target; no API calls made')
         check_files(prepared)
+        if os.path.lexists(backup_directory):
+            raise FileExistsError('Backup directory already exists; choose a new path before creating an edit')
         with self.new_edit() as edit:
             base = self._edit_url(edit.id)
             groups = list(prepared.get('images', []))
@@ -372,7 +405,8 @@ class ReleasePublisher(PlayPublisher):
             tracks = copy.deepcopy(prepared.get('tracks', []))
             for track in tracks:
                 for release in track['releases']:
-                    release['versionCodes'] = [str(uploaded) if code == '$uploaded' else code for code in release['versionCodes']]
+                    release['versionCodes'] = [str(uploaded) if code == '$uploaded' else str(int(code)) for code in release['versionCodes']]
+                    require(len(set(release['versionCodes'])) == len(release['versionCodes']), 'Uploaded versionCode duplicates a retained version; edit discarded')
                 self.transport.request('PUT', base + '/tracks/' + quote(track['track'], safe=''), payload=track)
             self.transport.request('POST', base + ':validate')
             result = {'status': 'validated-only' if validate_only else 'committed', 'editId': edit.id, 'backup': str(backup), 'uploadedVersionCode': uploaded, 'tracks': tracks}
@@ -411,12 +445,26 @@ def main(argv=None):
     snapshot_parser.add_argument('--image-type', action='append', choices=sorted(IMAGE_TYPES))
     snapshot_parser.add_argument('--live', action='store_true')
     snapshot_parser.add_argument('--output')
+    state_parser = sub.add_parser('release-state', help='Read track review/publication state outside an edit; offline unless --live')
+    state_parser.add_argument('--package', required=True)
+    state_parser.add_argument('--track', required=True)
+    state_parser.add_argument('--live', action='store_true')
+    state_parser.add_argument('--output')
     args = parser.parse_args(argv)
     try:
         if args.output:
-            require(not Path(args.output).exists(), '--output already exists; choose a new file')
-        if args.command == 'snapshot':
+            require(not os.path.lexists(args.output), '--output already exists; choose a new file')
+        if args.command in {'snapshot', 'release-state'}:
             require(bool(re.fullmatch(r'[A-Za-z][A-Za-z0-9_]*(?:\.[A-Za-z][A-Za-z0-9_]*)+', args.package)), 'Invalid package')
+            if args.command == 'release-state':
+                require(bool(args.track) and not any(c.isspace() or c in '/?#' for c in args.track), 'Use an exact API track identifier')
+                result = ReleasePublisher(args.package, ADCTransport()).release_state(args.track) if args.live else {
+                    'status': 'offline-read-plan', 'package_name': args.package, 'track': args.track,
+                    'source': 'Android Publisher applications.tracks.releases.list', 'note': 'No credentials or network calls; use --live to read actual release lifecycle summaries without an edit'}
+                if args.output:
+                    write_json(Path(args.output), result)
+                print(json.dumps(result, ensure_ascii=False, indent=2))
+                return 0
             groups = None
             if args.language:
                 for language in args.language:
@@ -437,8 +485,10 @@ def main(argv=None):
         else:
             if getattr(args, 'current', None):
                 raise ValueError('--current is offline-only; live takes a fresh snapshot')
-            client = ReleasePublisher(prepared['package_name'], ADCTransport())
             backup = args.backup_directory or str(Path('outputs/play-release-backups') / (datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ') + '-' + secrets.token_hex(4)))
+            if os.path.lexists(backup):
+                raise FileExistsError('Backup directory already exists; choose a new path before creating an edit')
+            client = ReleasePublisher(prepared['package_name'], ADCTransport())
             result = client.apply(config, directory=config_path.parent, backup_directory=backup, validate_only=args.command == 'validate')
         if args.output:
             try:

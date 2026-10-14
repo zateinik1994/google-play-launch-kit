@@ -26,8 +26,12 @@ def validate_listing(listing):
         if not isinstance(value, str):
             errors.append("video: must be a string (empty string removes a video)")
         elif value:
-            url = urlparse(value)
-            if url.scheme != "https" or url.hostname not in {"www.youtube.com", "youtube.com", "youtu.be"}:
+            try:
+                url = urlparse(value)
+                valid_url = url.scheme == "https" and url.hostname in {"www.youtube.com", "youtube.com", "youtu.be"}
+            except ValueError:
+                valid_url = False
+            if not valid_url:
                 errors.append("video: use an HTTPS YouTube URL")
     return errors
 

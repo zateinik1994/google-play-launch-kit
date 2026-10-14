@@ -1,7 +1,7 @@
 {
   "name": "google-play-launch-kit",
   "description": "Android ASO, локализованные тексты Google Play, графика, review readiness и Google Ads App campaigns.",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "author": {
     "name": "Google Play Launch Kit contributors"
   },

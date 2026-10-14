@@ -26,8 +26,8 @@ AI-агент начинает с [AGENTS.md](AGENTS.md) и читает нуж�
 | [play-store-screenshots](skills/play-store-screenshots/SKILL.md) | Phone/tablet, локализованный UI, RTL, batch ZIP/manifests и headless export |
 | [play-metadata](skills/play-metadata/SKILL.md) | Тексты, графика, AAB, tracks/rollout через Publisher API с backup и receipts |
 | [play-aso-monitoring](skills/play-aso-monitoring/SKILL.md) | Сбор позиций, GCS reports, нормализация и анализ по сегментам |
-| [play-store-optimization](skills/play-store-optimization/SKILL.md) | Сбор/анализ отзывов, аудит карточки, расчет sample size эксперимента |
-| [play-policy-review](skills/play-policy-review/SKILL.md) | Review readiness, Data safety CSV/API, разбор отказа |
+| [play-store-optimization](skills/play-store-optimization/SKILL.md) | Отзывы с evidence/фразами, конкурентная матрица, аудит карточки, расчет эксперимента |
+| [play-policy-review](skills/play-policy-review/SKILL.md) | Locale/evidence checklist, Data safety CSV/API, release-state, разбор отказа |
 | [google-ads-launch](skills/google-ads-launch/SKILL.md) | Install tCPI/action tCPA, validateOnly и создание PAUSED |
 | [google-ads-monitoring](skills/google-ads-monitoring/SKILL.md) | Campaign/geo/asset reports, snapshot/reconcile, budget/target/status updates |
 
@@ -82,17 +82,19 @@ python3 shared/play_api.py apply --package com.example.habits --input examples/d
 Новая автоматизация также проверяется без аккаунта:
 
 ```bash
-python3 shared/store_data.py profiles --package com.example.habits --locale en-GB --country GB --fixture examples/data/public-play-fixture.json --output output/demo-profiles.json
+python3 shared/store_data.py profiles --package com.example.habits --locale en-US --country US --fixture examples/data/public-play-fixture.json --output output/demo-profiles.json
 python3 shared/aso_tools.py discover --profiles output/demo-profiles.json --seed 'habit tracker' --output output/demo-candidates.json
-python3 shared/aso_tools.py gaps --keywords output/demo-candidates.json --listings examples/data/listings.json --output output/demo-gaps.json
+python3 shared/aso_tools.py gaps --keywords output/demo-candidates.json --listings examples/data/listings.json --profiles output/demo-profiles.json --output output/demo-gaps.json
 python3 shared/aso_tools.py experiment --baseline-rate 0.08 --mde-relative 0.15 --daily-visitors 1000 --output output/demo-experiment.json
 python3 shared/appstorespy.py query --body examples/data/provider-query.json
 python3 shared/play_reports.py normalize --input examples/data/play-performance.csv --output output/demo-performance.json
 python3 shared/play_release.py plan --config examples/data/play-release.example.json
+python3 shared/play_release.py release-state --package com.example.habits --track production
+python3 shared/readiness.py report --project config/project.example.json --listings examples/data/listings.json --output output/demo-readiness.json
 python3 shared/ads_manage.py plan --config examples/data/google-ads-update.json --current examples/data/google-ads-snapshot.json --output output/demo-ads-plan.json
 ```
 
-Файлы `output/demo-*` создаются один раз; для повторного запуска выберите новые пути. Подробности: [сбор ASO](docs/aso-data-api.md), [offline tools](docs/aso-tools.md), [Play reports](docs/play-reports-api.md).
+Файлы `output/demo-*` создаются один раз; для повторного запуска выберите новые пути. Подробности: [сбор ASO](docs/aso-data-api.md), [offline tools](docs/aso-tools.md), [Play reports](docs/play-reports-api.md), [локали и чеклист](docs/readiness.md). Последний report будет INCOMPLETE: вымышленные метаданные не подтверждают готовность выпуска.
 
 ## Генератор графики
 
@@ -102,7 +104,7 @@ python3 -m http.server 8765 --bind 127.0.0.1 --directory examples/screenshots-ge
 
 Откройте [локальную студию](http://127.0.0.1:8765). Загрузите реальные экраны, задайте тексты и локали, порядок и layout по кадрам. Экспортируйте все материалы ZIP с JSON/CSV manifests либо отдельные PNG. Файлы обрабатываются в браузере. Для воспроизводимого headless export сохраненного проекта доступен Node 20+ CLI с optional Playwright. Инструкция: [README генератора](examples/screenshots-generator/README.md).
 
-Presets покрывают phone portrait/landscape и 7/10-inch tablet; есть безопасные custom dimensions, реальные captures по локалям и RTL composition. Feature graphic — 1024×500. [Validator](scripts/validate_images.py) имеет отдельный `tablet-screenshot` профиль и проверяет размер/формат. Содержание и принятие модерацией проверяются отдельно по [базе графики](knowledge/play-creatives.md).
+Presets покрывают phone portrait/landscape и 7/10-inch tablet; есть custom dimensions, отдельные палитры кадров, реальные captures по локалям и RTL по письменности. Feature graphic — 1024×500. [Validator](scripts/validate_images.py) имеет отдельный `tablet-screenshot` профиль и проверяет размер/формат. Содержание и принятие модерацией проверяются отдельно по [базе графики](knowledge/play-creatives.md).
 
 ## Подключить API
 
@@ -117,6 +119,8 @@ python3 -m pip install -r requirements.txt
 Следуйте [Publisher инструкции](docs/play-api.md) или [Google Ads инструкции](docs/google-ads-api.md). [Шаблон переменных](config/api_keys.env.example) документирует конфигурацию; `.env` автоматически не исполняется.
 
 Publisher release CLI поддерживает listing/details, загрузку/замену/удаление/перестановку графики, resumable AAB upload, releases и staged rollout по точным track IDs. До изменения сохраняются данные и оригиналы изображений; неизвестный commit не повторяется автоматически. Data safety CSV отправляется отдельным официальным API с prior export/backup. Изменения требуют явного `--live`.
+
+`release-state --live` читает review/publishing lifecycle через GET без создания edit. `PUBLISHED` не означает полный rollout или видимость карточки во всех рынках; ограничения API описаны в Publisher guide. Readiness сохраняет сведения о locale coverage и свидетельства проверок конкретной сборки, не заменяя Console eligibility/review.
 
 Google Ads поддерживает install-volume/tCPI и in-app-action/tCPA create в PAUSED, отчеты campaign/geo/assets, чтение и сверку кампаний, изменения бюджетов, target cost и статусов выбранных ресурсов. Перед write сверяется свежий snapshot; activation `ENABLED` может начать расход и должна входить в поручение. Keyword Planner дает отдельный сигнал **Google Search**, не Play query volume. Live-публикация и рекламные изменения на реальном аккаунте не проверялись; API-тесты используют подставные ответы.
 

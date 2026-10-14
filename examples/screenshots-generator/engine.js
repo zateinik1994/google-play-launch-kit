@@ -20,9 +20,27 @@
     exportLocales: ['en-US'], exportFeature: true, featureCaptureId: null,
     palette: { background: '#e5f6ef', accent: '#3a9475', foreground: '#12382a' },
     locales: { 'en-US': locale(), 'ru-RU': locale() }, captures: [] });
-  const isRTL = code => /^(ar|fa|he|ur|ps|sd|yi|dv|ug)(-|$)/i.test(code);
+  // Script subtags take precedence over the usual language direction (ar-Latn,
+  // az-Arab). Likely subtags come from the runtime's Unicode locale data.
+  // Unicode CLDR common/properties/scriptMetadata.txt, RTL field; checked 2026-10-14.
+  const rtlScripts = new Set('Adlm Arab Armi Avst Chrs Cprt Elym Gara Hatr Hebr Hung Khar Lydi Mand Mani Mend Merc Mero Narb Nbat Nkoo Orkh Ougr Palm Phli Phlp Phnx Prti Rohg Samr Sarb Sidt Sogd Sogo Syrc Thaa Yezi'.split(' '));
+  function checkedLocale(code) {
+    if (typeof code !== 'string' || !localePattern.test(code)) throw new Error('Use a valid language tag.');
+    try { return new Intl.Locale(code); } catch { throw new Error(`Invalid language tag: ${code}`); }
+  }
+  const isRTL = code => { const value = checkedLocale(code); return rtlScripts.has(value.script || value.maximize().script); };
   const slug = value => value.normalize('NFKD').replace(/[^\p{L}\p{N}]+/gu, '-').replace(/^-|-$/g, '').toLowerCase().slice(0, 60) || 'app';
   function object(value, message) { if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error(message); }
+  function checkedPalette(value) {
+    object(value, 'Invalid palette.');
+    const result = {};
+    for (const key of ['background', 'accent', 'foreground']) {
+      if (!/^#[0-9a-f]{6}$/i.test(value[key])) throw new Error('Project colors must use six-digit hex values.');
+      result[key] = value[key];
+    }
+    return result;
+  }
+  const paletteFor = (project, capture, kind) => (kind === 'feature-graphic' ? project.featurePalette : capture?.palette) || project.palette;
   function checkedCopy(value) {
     object(value, 'Project copy is missing.');
     const result = {};
@@ -81,17 +99,19 @@
     const codes = Object.keys(input.locales);
     if (!codes.length || codes.length > 50) throw new Error('Project needs 1–50 languages.');
     const p = emptyProject(); p.locales = Object.create(null);
+    const canonicalCodes = new Set();
     for (const code of codes) {
       const value = input.locales[code];
-      if (!localePattern.test(code) || !value || typeof value.appName !== 'string' || value.appName.length > 30 || /[\u0000-\u001f]/.test(value.appName)) throw new Error('Invalid language or app name.');
+      const canonical = checkedLocale(code).toString();
+      if (canonicalCodes.has(canonical)) throw new Error('Duplicate equivalent language tags.');
+      canonicalCodes.add(canonical);
+      if (!value || typeof value.appName !== 'string' || value.appName.length > 30 || /[\u0000-\u001f]/.test(value.appName)) throw new Error('Invalid language or app name.');
       p.locales[code] = { appName: value.appName, draft: checkedCopy(value.draft), feature: checkedCopy(value.feature) };
     }
     if (!Object.hasOwn(p.locales, input.locale)) throw new Error('Selected language is missing.');
     p.locale = input.locale; p.format = input.format;
-    for (const key of ['background', 'accent', 'foreground']) {
-      if (!/^#[0-9a-f]{6}$/i.test(input.palette?.[key])) throw new Error('Project colors must use six-digit hex values.');
-      p.palette[key] = input.palette[key];
-    }
+    p.palette = checkedPalette(input.palette);
+    if (input.featurePalette !== undefined) p.featurePalette = checkedPalette(input.featurePalette);
     if (input.version === 2) {
       for (const field of ['customProfiles', 'profileOptions']) { if (input[field] !== undefined) object(input[field], `Invalid ${field}.`); }
       p.customProfiles = Object.create(null); p.profileOptions = Object.create(null);
@@ -154,11 +174,13 @@
         const checked = checkedProfile({ ...base, layout: options.layout, textRatio: options.textRatio, imageScale: options.imageScale });
         layouts[id] = { layout: checked.layout, textRatio: checked.textRatio, imageScale: checked.imageScale };
       }
-      captures.push({ id: item.id, device, ...source, copy: translations, sources, layouts });
+      captures.push({ id: item.id, device, ...source, copy: translations, sources, layouts,
+        ...(item.palette !== undefined ? { palette: checkedPalette(item.palette) } : {}) });
     }
     p.captures = captures;
     p.selectedId = captures.some(c => c.id === input.selectedId) ? input.selectedId : captures[0]?.id || null;
     p.featureCaptureId = captures.some(c => c.id === input.featureCaptureId) ? input.featureCaptureId : p.selectedId;
+    if (p.format === 'feature-graphic') p.selectedId = p.featureCaptureId;
     return { project: p, images };
   }
   const sourceFor = (capture, code) => ({ source: capture.sources?.[code] || capture, key: `${capture.id}:${capture.sources?.[code] ? code : 'default'}`, fallback: !capture.sources?.[code] });
@@ -187,12 +209,13 @@
     if (!capture || !Object.hasOwn(project.locales, code)) throw new Error('Capture/language is missing.');
     if (job.kind !== 'feature-graphic' && capture.device !== config.device) throw new Error('A phone capture cannot demonstrate a tablet experience.');
     const chosen = sourceFor(capture, code), image = images.get(chosen.key), words = job.kind === 'feature-graphic' ? project.locales[code].feature : capture.copy[code];
+    const palette = paletteFor(project, capture, job.kind);
     if (!image) throw new Error('Source capture is not decoded.');
     if (!preview && config.layout !== 'ui-only' && (!project.locales[code].appName.trim() || !words.headline.trim())) throw new Error(`${code} / ${job.profileId} / ${job.order}: app name and headline are required for this layout.`);
     canvas.width = config.width; canvas.height = config.height;
     const ctx = canvas.getContext('2d', { alpha: false }), w = canvas.width, h = canvas.height, rtl = isRTL(code), pad = Math.min(w, h) * .045;
-    ctx.fillStyle = project.palette.background; ctx.fillRect(0, 0, w, h);
-    ctx.direction = rtl ? 'rtl' : 'ltr'; ctx.textBaseline = 'top'; ctx.fillStyle = project.palette.foreground;
+    ctx.fillStyle = palette.background; ctx.fillRect(0, 0, w, h);
+    ctx.direction = rtl ? 'rtl' : 'ltr'; ctx.textBaseline = 'top'; ctx.fillStyle = palette.foreground;
     let overflow = false, box;
     function lines(text, width) {
       const output = [];
@@ -235,11 +258,12 @@
     const scale = Math.min(box.width / image.width, box.height / image.height) * config.imageScale, iw = image.width * scale, ih = image.height * scale;
     const bounds = { x: box.x + (box.width - iw) / 2, y: box.y + (box.height - ih) / 2, width: iw, height: ih };
     ctx.drawImage(image, bounds.x, bounds.y, iw, ih);
-    if (guides) { ctx.strokeStyle = project.palette.accent; ctx.setLineDash([9, 9]); ctx.lineWidth = 2; ctx.strokeRect(pad, pad, w - 2 * pad, h - 2 * pad); }
+    if (guides) { ctx.strokeStyle = palette.accent; ctx.setLineDash([9, 9]); ctx.lineWidth = 2; ctx.strokeRect(pad, pad, w - 2 * pad, h - 2 * pad); }
     if (overflow && !preview) throw new Error(`${code} / ${job.profileId} / ${job.order}: text overflows; shorten copy or adjust the layout.`);
     return { ...job, device_type: job.kind === 'feature-graphic' ? 'all' : capture.device, width: w, height: h, app_name: project.locales[code].appName,
       source_name: chosen.source.name, source_locale: chosen.fallback ? 'default' : code, source_fallback: chosen.fallback,
       headline: config.layout === 'ui-only' ? '' : words.headline, alt_text: words.altText, rtl, layout: config.layout, image_bounds: bounds,
+      background: palette.background, foreground: palette.foreground, accent: palette.accent,
       technical_status: 'RGB-PNG-rendered', visual_status: 'pending', console_status: 'not-uploaded', warnings: [...(scale > 1 ? ['source_upscaled'] : []), ...(!words.altText.trim() ? ['alt_text_missing'] : []), ...(capture.device !== 'phone' && config.layout !== 'ui-only' ? ['tablet_has_text_overlay'] : []), ...(chosen.fallback ? ['default_source_used_verify_UI_language'] : [])], overflow };
   }
   const crcTable = Array.from({ length: 256 }, (_, n) => { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; return c >>> 0; });
@@ -277,11 +301,11 @@
     return new Blob([...parts, ...directory, end], { type: 'application/zip' });
   }
   function manifestCSV(assets) {
-    const fields = ['file', 'locale', 'device_type', 'profileId', 'kind', 'order', 'width', 'height', 'captureId', 'source_name', 'source_locale', 'source_fallback', 'headline', 'alt_text', 'rtl', 'layout', 'technical_status', 'visual_status', 'console_status', 'warnings'];
+    const fields = ['file', 'locale', 'device_type', 'profileId', 'kind', 'order', 'width', 'height', 'captureId', 'source_name', 'source_locale', 'source_fallback', 'headline', 'alt_text', 'rtl', 'layout', 'background', 'foreground', 'accent', 'technical_status', 'visual_status', 'console_status', 'warnings'];
     const cell = value => { let text = Array.isArray(value) ? value.join(';') : String(value ?? ''); if (/^[=+@-]/.test(text)) text = "'" + text; return '"' + text.replace(/"/g, '""') + '"'; };
     return fields.join(',') + '\r\n' + assets.map(a => fields.map(f => cell(a[f])).join(',')).join('\r\n') + '\r\n';
   }
-  const api = { devices, presets, MAX_PROJECT_BYTES, emptyCopy: copy, emptyLocale: locale, emptyProject, isRTL, slug, checkedProfile, sourceDimensions, profile, validateProject, sourceFor, jobs, render, crc32, rgbPNG, zip, manifestCSV };
+  const api = { devices, presets, MAX_PROJECT_BYTES, emptyCopy: copy, emptyLocale: locale, emptyProject, isRTL, slug, checkedLocale, checkedPalette, paletteFor, checkedProfile, sourceDimensions, profile, validateProject, sourceFor, jobs, render, crc32, rgbPNG, zip, manifestCSV };
   global.PlayStudio = api;
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
 })(typeof globalThis !== 'undefined' ? globalThis : window);

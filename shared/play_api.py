@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import re
 import secrets
 import sys
 from datetime import datetime, timezone
@@ -269,8 +271,7 @@ class _Edit:
 
 class PlayPublisher:
     def __init__(self, package_name: str, transport: Transport):
-        if not package_name or any(char.isspace() for char in package_name):
-            raise ValueError("A non-empty Android package name is required.")
+        validate_package_name(package_name)
         self.package_name = package_name
         self.transport = transport
         self.root = f"{API_ROOT}/applications/{quote(package_name, safe='')}/edits"
@@ -343,6 +344,11 @@ class PlayPublisher:
             return {"status": "committed", "editId": edit.id, "plan": plan}
 
 
+def validate_package_name(package_name):
+    if not isinstance(package_name, str) or not re.fullmatch(r'[A-Za-z][A-Za-z0-9_]*(?:\.[A-Za-z][A-Za-z0-9_]*)+', package_name):
+        raise ValueError("A valid Android package name is required, e.g. com.example.app.")
+
+
 def read_json(path: str | Path) -> dict[str, Any]:
     with Path(path).open(encoding="utf-8") as handle:
         data = json.load(handle)
@@ -385,6 +391,12 @@ def _parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     try:
+        if args.command in ("list", "export", "apply"):
+            validate_package_name(args.package)
+        if args.command == "export" and os.path.lexists(args.output):
+            raise FileExistsError("Export file already exists; choose a new path before creating an edit.")
+        if args.command == "apply" and args.live and args.backup and os.path.lexists(args.backup):
+            raise FileExistsError("Backup file already exists; choose a new path before creating an edit.")
         if args.command == "validate":
             errors = validate_listings(read_json(args.input))
             result = {"valid": not errors, "errors": errors}

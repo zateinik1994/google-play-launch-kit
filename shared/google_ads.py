@@ -11,6 +11,7 @@ import os
 import re
 import secrets
 import sys
+import tempfile
 from datetime import date, datetime, timezone
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
@@ -530,11 +531,16 @@ class GoogleAds:
         if len(rows) != 1 or not isinstance(rows[0].get("customer"), dict):
             raise AdsError("Could not read Google Ads account metadata.")
         account = rows[0]["customer"]
+        if str(account.get("id", "")) != self.customer:
+            raise AdsError("Account metadata did not confirm the requested customer ID.")
         if not isinstance(account.get("timeZone"), str) or not account["timeZone"] or not re.fullmatch(r"[A-Z]{3}", str(account.get("currencyCode", ""))):
             raise AdsError("Account metadata did not contain currency/timezone.")
         return account
 
     def report_metadata(self, start, end, action, *, package=None, campaign_ids=None):
+        date_range(start, end)
+        conversion_resource(action)
+        campaign_filter(package, campaign_ids)
         account = self.account()
         owner = conversion_resource(action).split("/")[1]
         action_client = self if owner == self.customer else GoogleAds(owner, self.version, self.transport)
@@ -544,6 +550,9 @@ class GoogleAds:
             "conversion_action.click_through_lookback_window_days, conversion_action.view_through_lookback_window_days "
             f"FROM conversion_action WHERE conversion_action.resource_name = '{action}'"
         )
+        if len(actions) > 1 or any(not isinstance(row.get("conversionAction"), dict) or
+                                   row["conversionAction"].get("resourceName") != action for row in actions):
+            raise AdsError("Conversion settings response did not confirm the selected action resource.")
         return {
             "source": "Google Ads API", "customer": self.customer, "apiVersion": self.version,
             "fetchedAt": datetime.now(timezone.utc).isoformat(), "account": account,
@@ -597,10 +606,32 @@ def read_config(path: str | Path):
 
 def write_report(path: Path, rows) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("x", encoding="utf-8", newline="") as handle:
-        writer = csv.DictWriter(handle, fieldnames=ADS_FIELDS)
-        writer.writeheader()
-        writer.writerows(rows)
+    # Publish only a complete CSV; linking is exclusive and cannot replace a
+    # destination created by another writer while the export was staged.
+    with tempfile.TemporaryDirectory(prefix=".ads-report-", dir=path.parent) as directory:
+        staged = Path(directory) / "report.csv"
+        with staged.open("x", encoding="utf-8", newline="") as handle:
+            writer = csv.DictWriter(handle, fieldnames=ADS_FIELDS)
+            writer.writeheader()
+            writer.writerows(rows)
+        os.link(staged, path)
+
+
+def write_report_bundle(path: Path, rows, metadata) -> Path:
+    """Expose metadata before the complete CSV; remove this sidecar on failure."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    sidecar = path.with_suffix(path.suffix + ".metadata.json")
+    with tempfile.TemporaryDirectory(prefix=".ads-report-", dir=path.parent) as directory:
+        staged_csv, staged_metadata = Path(directory) / "report.csv", Path(directory) / "metadata.json"
+        write_report(staged_csv, rows)
+        staged_metadata.write_text(json.dumps(metadata, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        os.link(staged_metadata, sidecar)
+        try:
+            os.link(staged_csv, path)
+        except OSError:
+            sidecar.unlink()
+            raise
+    return sidecar
 
 
 def _parser():
@@ -637,7 +668,7 @@ def main(argv: list[str] | None = None) -> int:
             config = read_config(args.config)
             keyword_ideas_request(config)  # Bad input must not load ADC.
             output = Path(args.output)
-            if output.exists():
+            if output.exists() or output.is_symlink():
                 raise FileExistsError(str(output))
             client = GoogleAds(customer, version, AdsADCTransport())
             result = client.keyword_ideas(config)
@@ -663,16 +694,14 @@ def main(argv: list[str] | None = None) -> int:
             default_name = f"google-ads-report-{stamp}.csv" if args.command == "report" else f"google-ads-{args.command.split('-', 1)[0]}-{stamp}.json"
             output = Path(args.output) if args.output else Path("outputs") / default_name
             sidecar = output.with_suffix(output.suffix + ".metadata.json") if args.command == "report" else None
-            if output.exists() or sidecar is not None and sidecar.exists():
+            if output.exists() or output.is_symlink() or sidecar is not None and (sidecar.exists() or sidecar.is_symlink()):
                 raise FileExistsError("Report or metadata file already exists; no API request made.")
             output.parent.mkdir(parents=True, exist_ok=True)
         client = GoogleAds(customer, version, AdsADCTransport())
         if args.command == "report":
             rows = client.report(args.start_date, args.end_date, args.conversion_action, package=args.package, campaign_ids=args.campaign_id)
             metadata = client.report_metadata(args.start_date, args.end_date, args.conversion_action, package=args.package, campaign_ids=args.campaign_id)
-            write_report(output, rows)
-            with sidecar.open("x", encoding="utf-8") as handle:
-                json.dump(metadata, handle, ensure_ascii=False, indent=2)
+            write_report_bundle(output, rows, metadata)
             result = {"status": "exported", "output": str(output), "metadata": str(sidecar), "rows": len(rows)}
         elif args.command in ("geo-report", "asset-report"):
             dimension = args.command.split("-", 1)[0]

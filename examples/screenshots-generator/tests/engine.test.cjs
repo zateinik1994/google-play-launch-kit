@@ -25,6 +25,31 @@ test('v2 round trip preserves custom layout, source overrides and device order',
   assert.deepEqual(second.project, first.project); assert.equal(E.sourceFor(second.project.captures[0], 'ru-RU').fallback, false);
   assert.equal(E.sourceFor(second.project.captures[1], 'ru-RU').fallback, true);
 });
+test('script direction overrides language defaults and invalid/equivalent tags are rejected', async () => {
+  for (const code of ['ar', 'az-Arab', 'pa-Arab', 'ckb', 'ks', 'wo-Gara']) assert.equal(E.isRTL(code), true, code);
+  for (const code of ['ar-Latn', 'ku-Latn', 'en-US']) assert.equal(E.isRTL(code), false, code);
+  const p = fixture(); p.locales['en-abc'] = E.emptyLocale();
+  await assert.rejects(E.validateProject(p, decode), /Invalid language tag/);
+  delete p.locales['en-abc']; p.locales['en-us'] = E.emptyLocale();
+  await assert.rejects(E.validateProject(p, decode), /equivalent/);
+});
+test('per-asset contrast palettes survive round trip without changing other assets', async () => {
+  const p = fixture(), ink = { background: '#172e32', accent: '#66cca6', foreground: '#edfaf4' };
+  p.captures[0].palette = ink; p.featurePalette = { ...ink, background: '#000000' };
+  const first = await E.validateProject(p, decode), second = await E.validateProject(first.project, decode);
+  assert.deepEqual(second.project, first.project);
+  assert.deepEqual(E.paletteFor(second.project, second.project.captures[0], 'screenshot'), ink);
+  assert.deepEqual(E.paletteFor(second.project, second.project.captures[1], 'screenshot'), p.palette);
+  assert.equal(E.paletteFor(second.project, second.project.captures[0], 'feature-graphic').background, '#000000');
+  p.captures[0].palette.background = 'red';
+  await assert.rejects(E.validateProject(p, decode), /six-digit/);
+});
+test('opening a feature project keeps preview and batch feature sources consistent', async () => {
+  const p = fixture(); p.format = 'feature-graphic';
+  const { project } = await E.validateProject(p, decode);
+  assert.equal(project.selectedId, project.featureCaptureId);
+  assert.equal(project.selectedId, E.jobs(project, { presets: [], feature: true })[0].captureId);
+});
 test('per-capture layouts survive save and reject device/profile mismatch', async () => {
   const p = fixture(); p.captures[0].layouts = { 'phone-portrait': { layout: 'split', textRatio: .4, imageScale: .75 } };
   const { project } = await E.validateProject(p, decode); assert.equal(project.captures[0].layouts['phone-portrait'].imageScale, .75);

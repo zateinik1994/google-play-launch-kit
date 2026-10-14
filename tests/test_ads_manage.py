@@ -166,6 +166,34 @@ class Plans(unittest.TestCase):
 
 
 class LiveExecution(unittest.TestCase):
+    def test_snapshot_rejects_foreign_customer_or_broken_parent_identity(self):
+        cases=[]
+        current=state(); current['campaigns']['77']['campaign']['resourceName']='customers/9999999999/campaigns/77'; cases.append(current)
+        current=state(); current['adGroups'][GROUP]['adGroup']['resourceName']=f'{BASE}/adGroups/123'; cases.append(current)
+        current=state(); current['adGroupAds'][AD]['adGroupAd']['resourceName']=f'{BASE}/adGroupAds/100~111'; cases.append(current)
+        current=state(); current['adGroupAds'][AD]['campaign']['id']='88'; cases.append(current)
+        for current in cases:
+            fake=FakeManage(current)
+            with self.subTest(current=current), self.assertRaises(AdsError):
+                snapshot(client(fake), 'com.example.focus')
+            self.assertTrue(all(url.endswith(':search') for _,url,_ in fake.calls))
+
+    def test_wrong_mutate_result_type_is_unknown_and_not_retried(self):
+        class WrongResult(FakeManage):
+            def request(self, method, url, *, payload):
+                result=super().request(method,url,payload=payload)
+                if url.endswith(':mutate') and not payload['validateOnly']:
+                    result['mutateOperationResponses'][0]={'adGroupResult': {'resourceName': CAMPAIGN}}
+                return result
+        fake=WrongResult(); records=[]
+        # Use a real change to ensure the test reaches mutate.
+        fake.current['campaigns']['77']['campaign']['status']='ENABLED'
+        saved=plan_changes(config(status='PAUSED',ad_group_resources=[],ad_group_ad_resources=[]),fake.current)
+        with self.assertRaises(AdsUpdateUnknown):
+            execute_plan(client(fake),saved,live=True,receipt_writer=records.append)
+        self.assertEqual(records[-1]['status'],'mutation-outcome-unknown')
+        self.assertEqual(sum(url.endswith(':mutate') and not p['validateOnly'] for _,url,p in fake.calls),1)
+
     def test_snapshot_has_package_bids_budget_and_child_statuses(self):
         fake = FakeManage()
         result = snapshot(client(fake), "com.example.focus")

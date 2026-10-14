@@ -33,6 +33,10 @@ test('browser upload/edit/reorder/localized UI/RTL/ZIP and saved project headles
     await page.locator('#images').setInputFiles([{ name: 'one.png', mimeType: 'image/png', buffer: red }, { name: 'two.png', mimeType: 'image/png', buffer: red }]);
     await page.waitForFunction(() => window.PlayStudioEditor.getProject().captures.length === 2);
     await page.locator('#app-name').fill('Fixture'); await page.locator('#headline').fill('One clear screen'); await page.locator('#alt-text').fill('First screen');
+    await page.locator('#palette-scope').selectOption('asset'); await page.locator('[data-palette="ink"]').click();
+    assert.equal(await page.evaluate(() => window.PlayStudioEditor.getProject().captures[0].palette.background), '#172e32');
+    assert.equal(await page.evaluate(() => window.PlayStudioEditor.getProject().palette.background), '#e5f6ef');
+    await page.locator('#palette-scope').selectOption('project');
     await page.locator('#image-scale').press('Home');
     assert.equal(await page.evaluate(() => window.PlayStudioEditor.getProject().captures[0].layouts['phone-portrait'].imageScale), .5);
     await page.locator('summary').filter({ hasText: 'Custom screenshot size' }).click(); await page.locator('#custom-width').fill('640'); await page.locator('#custom-height').fill('1280'); await page.locator('#apply-custom').click();
@@ -56,6 +60,12 @@ test('browser upload/edit/reorder/localized UI/RTL/ZIP and saved project headles
     const rtl = await page.evaluate(job => window.PlayStudioEditor.exportJob(job).then(r => r.asset), { locale: 'ar', profileId: 'phone-landscape', captureId: id, kind: 'screenshot', order: 2 });
     const ltr = await page.evaluate(job => window.PlayStudioEditor.exportJob(job).then(r => r.asset), { locale: 'en-US', profileId: 'phone-landscape', captureId: id, kind: 'screenshot', order: 2 });
     assert.equal(rtl.rtl, true); assert.equal(rtl.source_name, 'arabic-ui.png'); assert.equal(rtl.source_fallback, false); assert.ok(rtl.image_bounds.x < ltr.image_bounds.x);
+    const contrasted = await page.evaluate(job => window.PlayStudioEditor.exportJob(job).then(r => r.asset), { locale: 'en-US', profileId: 'phone-portrait', captureId: project.captures.find(c => c.name === 'one.png').id, kind: 'screenshot', order: 2 });
+    assert.equal(contrasted.background, '#172e32'); assert.equal(ltr.background, '#e5f6ef');
+    const featureProject = { ...project, format: 'feature-graphic', selectedId: project.captures[0].id, featureCaptureId: project.captures[2].id };
+    await page.evaluate(value => window.PlayStudioEditor.loadProject(value), featureProject);
+    assert.equal(await page.evaluate(() => window.PlayStudioEditor.getProject().selectedId), featureProject.featureCaptureId);
+    await page.evaluate(value => window.PlayStudioEditor.loadProject(value), project);
     const bad = { ...project, captures: project.captures.map((c, i) => i ? c : { ...c, dataUrl: 'https://example.com/source.png' }) };
     await page.locator('#load-config').setInputFiles({ name: 'bad.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(bad)) });
     await page.waitForFunction(() => document.querySelector('#status').textContent.includes('unchanged'));
@@ -83,6 +93,12 @@ test('browser upload/edit/reorder/localized UI/RTL/ZIP and saved project headles
     const repeat = await command(['--project', projectFile, '--output', output, ...browserArgs]); assert.equal(repeat.code, 1); assert.match(repeat.stderr, /already exists/);
     const badFile = path.join(directory, 'invalid.json'), missingOutput = path.join(directory, 'invalid-output'); await fs.writeFile(badFile, JSON.stringify(bad));
     const invalid = await command(['--project', badFile, '--output', missingOutput, ...browserArgs]); assert.equal(invalid.code, 1); await assert.rejects(fs.stat(missingOutput), { code: 'ENOENT' });
+    const prefixedIds = { ...project, selectedId: 'first', featureCaptureId: 'first', captures: project.captures.map((c, i) => ({ ...c, id: ['first', 'first:variant', 'tablet'][i] })) };
+    await page.evaluate(value => window.PlayStudioEditor.loadProject(value), prefixedIds);
+    await page.getByRole('button', { name: 'Remove capture 1', exact: true }).click();
+    const remaining = await page.evaluate(() => window.PlayStudioEditor.exportJob({ locale: 'en-US', profileId: 'phone-portrait', captureId: 'first:variant', kind: 'screenshot', order: 1 }).then(result => result.asset));
+    assert.equal(remaining.captureId, 'first:variant');
+    assert.equal(remaining.source_name, 'one.png');
     assert.deepEqual(pageErrors, []); assert.deepEqual(external, []);
     console.log(`Browser QA artifacts: ${directory}`);
   } finally { if (browser) await browser.close(); await new Promise(resolve => server.close(resolve)); }

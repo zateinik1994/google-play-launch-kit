@@ -1,6 +1,7 @@
 """Data safety uses a supplied current template; never generate product facts."""
 import contextlib
 import csv
+import hashlib
 import io
 import json
 import tempfile
@@ -55,6 +56,39 @@ class SafetyTests(unittest.TestCase):
         transport,calls=self.transport()
         result=apply('com.example.habits',self.before,self.before,self.root/'backup',transport)
         self.assertEqual(result['status'],'unchanged');self.assertEqual(calls,[])
+    def test_comparison_backup_payload_and_receipt_use_one_csv_snapshot(self):
+        original = self.proposed.read_bytes()
+        read_paths = []
+        def changing_read(path):
+            value = read_csv(path)
+            read_paths.append(Path(path))
+            if Path(path) == self.proposed:
+                self.csv('proposed.csv', 'FALSE')
+            return value
+        transport, calls = self.transport()
+        with patch('shared.play_safety.read_csv', side_effect=changing_read):
+            result = apply('com.example.habits', self.proposed, self.before, self.root/'backup', transport)
+        self.assertEqual(read_paths, [self.proposed, self.before])
+        self.assertEqual(result['status'], 'submitted')
+        self.assertEqual(calls[0][2]['safetyLabels'], original.decode('utf-8-sig'))
+        self.assertEqual((self.root/'backup/proposed.csv').read_bytes(), original)
+        self.assertEqual(result['proposed_sha256'], hashlib.sha256(original).hexdigest())
+    def test_unchanged_live_cli_does_not_load_credentials(self):
+        with patch('shared.play_safety.ADCTransport', side_effect=AssertionError('network')), contextlib.redirect_stdout(io.StringIO()) as output:
+            self.assertEqual(main(['apply', '--live', '--package', 'com.example.habits', '--csv', str(self.before), '--before-csv', str(self.before), '--backup-directory', str(self.root/'backup')]), 0)
+        self.assertEqual(json.loads(output.getvalue())['status'], 'unchanged')
+        self.assertFalse((self.root/'backup').exists())
+    def test_existing_backup_blocks_cli_before_loading_credentials(self):
+        (self.root/'backup').mkdir()
+        with patch('shared.play_safety.ADCTransport', side_effect=AssertionError('network')), contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(main(['apply', '--live', '--package', 'com.example.habits', '--csv', str(self.proposed), '--before-csv', str(self.before), '--backup-directory', str(self.root/'backup')]), 2)
+    def test_csv_size_limit_bounds_initial_file_read(self):
+        data = io.BytesIO(b'x' * (4 * 1024 * 1024 + 2))
+        with patch('shared.play_safety.Path.open') as opened:
+            opened.return_value.__enter__.return_value = data
+            with self.assertRaisesRegex(ValueError, '4 MiB'):
+                read_csv('oversized.csv')
+            self.assertEqual(data.tell(), 4 * 1024 * 1024 + 1)
     def test_offline_apply_and_missing_before_never_load_credentials(self):
         with patch('shared.play_safety.ADCTransport',side_effect=AssertionError('network')),contextlib.redirect_stdout(io.StringIO()),contextlib.redirect_stderr(io.StringIO()):
             self.assertEqual(main(['apply','--package','com.example.habits','--csv',str(self.proposed)]),0)

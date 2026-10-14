@@ -12,7 +12,7 @@ python3 scripts/playkit.py ads-report examples/data/ads.csv
 python3 scripts/playkit.py ads-plan examples/data/campaign.json
 ```
 
-Для сохранения JSON используйте `--output путь.json` у любой команды кроме `init`. Файл результата перезаписывается, если уже существует. `init` отказывается работать в существующей папке. Коды завершения: `0` — успех, `1` — метаданные не прошли валидацию, `2` — ошибка входа/IO. Publisher API использует собственный CLI — [документация](play-api.md).
+Для сохранения JSON используйте `--output путь.json` у любой команды кроме `init`. Файл результата перезаписывается, если уже существует, но output не может совпадать ни с одним input, включая symlink/hardlink: исходники сохраняются. `init` отказывается работать в существующей папке и убирает staging при ошибке, не оставляя частично созданный workspace. Коды завершения: `0` — успех, `1` — метаданные не прошли валидацию, `2` — ошибка входа/IO. Publisher API использует собственный CLI — [документация](play-api.md).
 
 ## Дополнительная автоматизация
 
@@ -21,6 +21,7 @@ python3 scripts/playkit.py ads-plan examples/data/campaign.json
 | `shared/store_data.py` | Public profiles/search/ranks/reviews; offline `--fixture` | [Сбор ASO](aso-data-api.md) |
 | `shared/appstorespy.py` | 22 typed Android provider операции; offline plan/явный billed `--execute` | [Сбор ASO](aso-data-api.md) |
 | `shared/aso_tools.py` | Offline discover/gaps/experiment power estimate | [ASO tools](aso-tools.md) |
+| `shared/readiness.py` | Offline locale inventory и package/release evidence checklist | [Чеклист и локали](readiness.md) |
 | `shared/play_reports.py` | GCS download и отдельные legacy/click CSV normalization/summary | [Play reports](play-reports-api.md) |
 | `shared/play_release.py` | Listing/details/images/AAB/tracks; default offline, `--live` | [Publisher API](play-api.md) |
 | `shared/play_safety.py` | Data safety CSV plan/официальный POST с backup | [Publisher API](play-api.md) |

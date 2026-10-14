@@ -2,6 +2,7 @@
 """Download official Play CSV reports from GCS and normalize explicit metric families."""
 import argparse
 import csv
+import hashlib
 import io
 import json
 import re
@@ -81,6 +82,10 @@ ALIASES = {
 
 
 def normalize_csv(raw, *, family="auto", mapping=None, package=None, encoding=None):
+    if not isinstance(raw, (bytes, str)):
+        raise ValueError("Report must be bytes or CSV text")
+    original = raw if isinstance(raw, bytes) else raw.encode("utf-8")
+    codec = "unicode-text"
     if isinstance(raw, bytes):
         codec = encoding or ("utf-16" if raw.startswith((b"\xff\xfe", b"\xfe\xff")) else "utf-8-sig")
         raw = raw.decode(codec)
@@ -88,6 +93,8 @@ def normalize_csv(raw, *, family="auto", mapping=None, package=None, encoding=No
     headers = reader.fieldnames or []
     if not headers or len(headers) != len(set(headers)):
         raise ValueError("Report needs unique column headers")
+    if mapping is not None and (not isinstance(mapping, dict) or any(not isinstance(value, str) for value in mapping.values())):
+        raise ValueError("Mapping must be a JSON object of normalized fields to source column names")
     explicit = mapping or {}
     if set(explicit) - set(ALIASES):
         raise ValueError("Mapping contains unsupported normalized fields")
@@ -98,6 +105,8 @@ def normalize_csv(raw, *, family="auto", mapping=None, package=None, encoding=No
             raise ValueError(f"Ambiguous/missing column mapping for {name}")
         if matches:
             columns[name] = matches[0]
+    if len(set(columns.values())) != len(columns):
+        raise ValueError("Each source column must map to one normalized field; refusing to duplicate metrics or dimensions")
     if "date" not in columns or "visitors" not in columns:
         raise ValueError("Date and visitor columns are required; provide --mapping for translated exports")
     acquisitions = "acquisitions" in columns
@@ -124,6 +133,8 @@ def normalize_csv(raw, *, family="auto", mapping=None, package=None, encoding=No
             if text and not re.fullmatch(r"[0-9]+", text):
                 raise ValueError(f"{field}: expected integer or blank; suppressed counts stay unknown")
             normalized[field] = int(text) if text else None
+            if normalized[field] is not None and normalized[field] > 2**63 - 1:
+                raise ValueError(f"{field}: expected a nonnegative 64-bit integer or blank")
         normalized["metric_family"] = family
         if family == "legacy-acquisitions":
             for field in ("install_clicks", "open_clicks", "pre_registration_clicks"):
@@ -131,7 +142,8 @@ def normalize_csv(raw, *, family="auto", mapping=None, package=None, encoding=No
         else:
             normalized["acquisitions"] = None
         output.append({key: normalized.get(key) for key in FIELDS})
-    return {"metadata": {"metric_family": family, "rows": len(output),
+    return {"metadata": {"metric_family": family, "rows": len(output), "input_sha256": hashlib.sha256(original).hexdigest(),
+                         "input_encoding": codec, "source_columns": headers, "column_mapping": columns,
                          "note": "Daily visitors are not deduplicated weekly/monthly users. Search-term visits are your app's traffic, not total query volume."}, "data": output}
 
 
@@ -204,7 +216,8 @@ def main(argv=None):
     args = p.parse_args(argv)
     try:
         output = Path(args.output)
-        if output.exists() or output.with_suffix(output.suffix + ".meta.json").exists():
+        sidecar = output.with_suffix(output.suffix + ".meta.json")
+        if output.exists() or output.is_symlink() or sidecar.exists() or sidecar.is_symlink():
             raise ValueError("Output already exists")
         if args.command == "download":
             name = args.object or report_object(args.package or "", args.month or "", args.breakdown)
@@ -224,6 +237,7 @@ def main(argv=None):
         elif args.command == "normalize":
             mapping = json.loads(Path(args.mapping).read_text()) if args.mapping else None
             result = normalize_csv(Path(args.input).read_bytes(), family=args.family, mapping=mapping, package=args.package, encoding=args.encoding)
+            result["metadata"].update(input_file=str(Path(args.input).resolve()), normalized_at=datetime.now(timezone.utc).isoformat())
         else:
             result = summarize(json.loads(Path(args.input).read_text())["data"], args.action)
         output.parent.mkdir(parents=True, exist_ok=True)

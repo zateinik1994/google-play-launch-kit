@@ -85,12 +85,47 @@ class AnalysisTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             ads_report([self.ads(date="2026-1-1")])
 
+    def test_extreme_numbers_cannot_become_infinity_or_zero(self):
+        base = {"query": "habit", "locale": "en-US", "country": "US", "source": "provided", "relevance": "3", "volume_source": "provided measurement"}
+        for value in ("1e9999", "1e-9999"):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                keywords([dict(base, volume=value)])
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                ads_report([self.ads(cost=value)])
+        with self.assertRaises(ValueError):
+            ads_report([self.ads(cost="1e308", conversions="1e-300")])
+        with self.assertRaises(ValueError):
+            ads_report([self.ads(impressions=str(2**63))])
+        first = self.ads(impressions=str(2**63 - 1))
+        with self.assertRaises(ValueError):
+            ads_report([first, dict(first, date="2026-10-02")])
+        result = ads_report([self.ads(conversions="0.00125")])["campaigns"][0]
+        self.assertEqual(result["conversions"], 0.00125)
+        json.dumps(result, allow_nan=False)
+
     def test_review_id_dedup_and_topic_limits(self):
         result = reviews([{"review_id": "1", "rating": "2", "text": "Crash after payment"}])
         self.assertEqual(result["average_rating"], 2)
         self.assertEqual(result["topic_counts"], {"stability": 1, "billing": 1})
         with self.assertRaises(ValueError):
             reviews([{"review_id": "1", "rating": "0", "text": ""}])
+
+    def test_review_language_and_feature_request_evidence_are_inspectable(self):
+        result = reviews([
+            {"review_id": "a", "rating": "4", "text": "Please add offline mode. Offline mode is useful.", "created_at": "2026-10-01", "app_version": "1.2"},
+            {"review_id": "b", "rating": "5", "text": "Offline mode would be nice"},
+            {"review_id": "c", "rating": "2", "text": "Crash after payment", "app_version": "1.3"},
+            {"review_id": "d", "rating": "3", "text": "An unwanted popup"},
+        ])
+        phrase = next(row for row in result["recurring_phrases"] if row["phrase"] == "offline mode")
+        self.assertEqual(phrase["review_documents"], 2)
+        self.assertEqual(phrase["review_ids"], ["a", "b"])
+        self.assertEqual([row["review_id"] for row in result["feature_request_cues"]], ["a", "b"])
+        self.assertEqual(result["feature_request_cues"][0]["app_version"], "1.2")
+        self.assertEqual(result["low_rating_reviews"][0]["app_version"], "1.3")
+        isolated = reviews([{"review_id": "x", "rating": "4", "text": "Offline mode offline mode"}])
+        self.assertEqual(isolated["recurring_phrases"], [])
+        self.assertNotIn("sentiment", result)
 
     def test_campaign_plan_refuses_asa_fields(self):
         config = json.loads((ROOT/"examples/data/campaign.json").read_text())

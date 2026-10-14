@@ -1,5 +1,6 @@
 """Analysis of user-supplied normalized CSV exports. No scraping or invented data."""
 import csv
+import math
 import re
 from collections import Counter, defaultdict
 from datetime import datetime
@@ -22,6 +23,13 @@ def read_csv(path, required):
         return rows
 
 
+def finite_float(value, field):
+    result = float(value)
+    if not math.isfinite(result) or value != 0 and result == 0:
+        raise ValueError(f"{field}: outside the finite JSON number range")
+    return result
+
+
 def number(value, field, integer=False):
     try:
         result = Decimal(str(value))
@@ -29,6 +37,10 @@ def number(value, field, integer=False):
         raise ValueError(f"{field}: expected a number") from exc
     if not result.is_finite() or result < 0 or (integer and result != result.to_integral_value()):
         raise ValueError(f"{field}: expected a finite non-negative {'integer' if integer else 'number'}")
+    if integer and result > 2**63 - 1:
+        raise ValueError(f"{field}: expected a nonnegative 64-bit integer")
+    if not integer:
+        finite_float(result, field)
     return int(result) if integer else result
 
 
@@ -43,7 +55,7 @@ def keywords(rows):
         if key in seen:
             raise ValueError(f"Duplicate keyword observation: {key}")
         seen.add(key)
-        volume = None if not row.get("volume", "").strip() else float(number(row["volume"], "volume"))
+        volume = None if not row.get("volume", "").strip() else finite_float(number(row["volume"], "volume"), "volume")
         relevance = number(row.get("relevance", ""), "relevance", integer=True)
         if relevance > 3:
             raise ValueError("relevance: use 0 (unrelated) to 3 (core feature)")
@@ -118,10 +130,14 @@ TOPICS = {
     "usability": ("confusing", "interface", "navigation", "неудоб", "интерфейс"),
     "performance": ("slow", "battery", "lag", "медлен", "батаре"),
 }
+FEATURE_REQUEST_CUES = ("please add", "wish", "would be nice", "feature request", "missing",
+                        "добавьте", "хотелось бы", "не хватает", "пожалуйста добавьте")
+REVIEW_STOP = set("a an and are as at be by for from in is it of on or the to with your you app apps this that can и в во на для от по с со к о об а но или это как что мы вы ваш ваша приложение приложения".split())
 
 
 def reviews(rows):
     ratings, topics, low = Counter(), Counter(), []
+    phrases, issue_evidence, feature_requests = defaultdict(list), [], []
     seen = set()
     for row in rows:
         review_id = row["review_id"].strip()
@@ -133,15 +149,39 @@ def reviews(rows):
             raise ValueError("rating must be 1..5")
         text = row["text"].casefold()
         labels = [name for name, stems in TOPICS.items() if any(stem in text for stem in stems)]
+        words = re.findall(r"[^\W_]+", text, re.UNICODE)
+        observed_phrases = set()
+        for size in (2, 3):
+            for i in range(len(words) - size + 1):
+                window = words[i:i+size]
+                if window[0] not in REVIEW_STOP and window[-1] not in REVIEW_STOP:
+                    observed_phrases.add(" ".join(window))
+        for phrase in observed_phrases:
+            phrases[phrase].append(review_id)
+        # Exact token phrases produce inspectable cues, not confirmed intent.
+        cues = []
+        for cue in FEATURE_REQUEST_CUES:
+            parts = cue.split()
+            if any(words[i:i+len(parts)] == parts for i in range(len(words)-len(parts)+1)):
+                cues.append(cue)
+        evidence = {"review_id": review_id, "rating": rating, "topics": labels, "text": row["text"],
+                    "created_at": row.get("created_at") or None, "app_version": row.get("app_version") or None}
+        if labels:
+            issue_evidence.append(evidence)
+        if cues:
+            feature_requests.append({**evidence, "matched_cues": cues, "needs_human_review": True})
         ratings[rating] += 1
         topics.update(labels)
         if rating <= 2:
-            low.append({"review_id": review_id, "rating": rating, "topics": labels, "text": row["text"]})
+            low.append(evidence)
     n = len(rows)
     return {"count": n, "average_rating": round(sum(k*v for k, v in ratings.items())/n, 3) if n else None,
             "ratings": {str(k): ratings[k] for k in range(1, 6)}, "topic_counts": dict(topics),
             "low_rating_reviews": low,
-            "method": "Substring dictionary for English/Russian; labels overlap and need human review, no sentiment inference."}
+            "topic_evidence": issue_evidence, "feature_request_cues": feature_requests,
+            "recurring_phrases": [{"phrase": phrase, "review_documents": len(ids), "review_ids": ids}
+                                  for phrase, ids in sorted(phrases.items(), key=lambda item: (-len(item[1]), item[0])) if len(ids) >= 2][:30],
+            "method": "English/Russian topic substring dictionary and feature-request token cues need human review; recurring 2–3 token phrases count distinct reviews in this sample without joining across removed words; no sentiment, severity or population inference."}
 
 
 ADS_FIELDS = ("date", "campaign_id", "currency", "cost", "impressions", "clicks", "conversions", "conversion_action")
@@ -178,10 +218,10 @@ def ads_report(rows):
         cost, clicks, impressions, conversions = (group[k] for k in ("cost", "clicks", "impressions", "conversions"))
         result.append({"campaign_id": campaign, "currency": currency, "conversion_action": action,
                        "from": min(group["dates"]), "to": max(group["dates"]), "days_observed": len(group["dates"]),
-                       "cost": float(cost), "impressions": impressions, "clicks": clicks, "conversions": float(conversions),
+                       "cost": finite_float(cost, "total cost"), "impressions": number(impressions, "total impressions", integer=True), "clicks": number(clicks, "total clicks", integer=True), "conversions": finite_float(conversions, "total conversions"),
                        "ctr": round(clicks/impressions, 6) if impressions else None,
-                       "cpc": round(float(cost/clicks), 4) if clicks else None,
-                       "cost_per_selected_conversion": round(float(cost/conversions), 4) if conversions else None})
+                       "cpc": round(finite_float(cost/clicks, "cpc"), 4) if clicks else None,
+                       "cost_per_selected_conversion": round(finite_float(cost/conversions, "cost per selected conversion"), 4) if conversions else None})
     return {"campaigns": result, "note": "Conversions can be fractional. Costs are in account currency, not micros. Attribution lag and conversion definitions need review; this tool never changes bids."}
 
 

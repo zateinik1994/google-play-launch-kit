@@ -271,6 +271,39 @@ class LocalTests(unittest.TestCase):
                     code = main(["apply", "--input", str(input_path), "--package", "com.example.focus", "--live"])
             self.assertEqual(code, 2)
 
+    def test_malformed_video_url_returns_structured_validation_error(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory)/'listing.json'
+            write_json(path, {'en-US':dict(DESIRED['en-US'], video='https://[invalid-youtube-url')})
+            with patch('shared.play_api.ADCTransport', side_effect=AssertionError('Must stay offline')), contextlib.redirect_stdout(io.StringIO()) as stdout:
+                self.assertEqual(main(['validate', '--input', str(path)]), 2)
+            result = json.loads(stdout.getvalue())
+            self.assertFalse(result['valid'])
+            self.assertIn('video: use an HTTPS YouTube URL', result['errors'][0])
+
+    def test_invalid_package_cli_never_loads_credentials(self):
+        with tempfile.TemporaryDirectory() as directory:
+            input_path = Path(directory)/'listing.json'
+            write_json(input_path, DESIRED)
+            for package in ('com example', 'com/example', 'example', ''):
+                for command in (['list'], ['apply', '--input', str(input_path), '--live']):
+                    with self.subTest(command=command, package=package), patch('shared.play_api.ADCTransport', side_effect=AssertionError('Must stay offline')), contextlib.redirect_stderr(io.StringIO()):
+                        self.assertEqual(main(command + ['--package', package]), 2)
+
+    def test_existing_export_or_backup_blocks_before_credentials(self):
+        with tempfile.TemporaryDirectory() as directory:
+            input_path = Path(directory)/'listing.json'
+            write_json(input_path, DESIRED)
+            output = Path(directory)/'existing.json'
+            write_json(output, CURRENT)
+            broken = Path(directory)/'broken-link.json'
+            broken.symlink_to(Path(directory)/'missing.json')
+            for path in (output, broken):
+                for command in (['export', '--output', str(path)], ['apply', '--live', '--input', str(input_path), '--backup', str(path)]):
+                    with self.subTest(command=command), patch('shared.play_api.ADCTransport', side_effect=AssertionError('Must stay offline')), contextlib.redirect_stderr(io.StringIO()):
+                        self.assertEqual(main(command + ['--package', 'com.example.focus']), 2)
+            self.assertEqual(json.loads(output.read_text()), CURRENT)
+
     def test_live_cli_creates_backup_and_reports_committed(self):
         transport = FakeTransport()
         with tempfile.TemporaryDirectory() as directory:

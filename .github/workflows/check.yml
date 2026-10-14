@@ -37,10 +37,13 @@ jobs:
       - run: python shared/play_release.py plan --config examples/data/play-release.example.json
       - run: python shared/appstorespy.py query --body examples/data/provider-query.json
       - run: |
-          python shared/store_data.py profiles --package com.example.habits --locale en-GB --country GB --fixture examples/data/public-play-fixture.json --output /tmp/play-profiles.json
+          python shared/store_data.py profiles --package com.example.habits --locale en-US --country US --fixture examples/data/public-play-fixture.json --output /tmp/play-profiles.json
           python shared/aso_tools.py discover --profiles /tmp/play-profiles.json --seed 'habit tracker' --output /tmp/play-candidates.json
-          python shared/aso_tools.py gaps --keywords /tmp/play-candidates.json --listings examples/data/listings.json --output /tmp/play-gaps.json
+          python shared/aso_tools.py gaps --keywords /tmp/play-candidates.json --listings examples/data/listings.json --profiles /tmp/play-profiles.json --output /tmp/play-gaps.json
           python shared/aso_tools.py experiment --baseline-rate 0.08 --mde-relative 0.15 --daily-visitors 1000 --output /tmp/play-experiment.json
           python shared/play_reports.py normalize --input examples/data/play-performance.csv --output /tmp/play-performance.json
           python shared/play_reports.py summary --input /tmp/play-performance.json --output /tmp/play-performance-summary.json
           python shared/ads_manage.py plan --config examples/data/google-ads-update.json --current examples/data/google-ads-snapshot.json --output /tmp/play-ads-plan.json
+          python shared/play_release.py release-state --package com.example.habits --track production
+          python shared/readiness.py report --project config/project.example.json --listings examples/data/listings.json --output /tmp/play-readiness.json
+          python -c "import json; assert json.load(open('/tmp/play-gaps.json'))['rows']; assert json.load(open('/tmp/play-gaps.json'))['keyword_metadata']['is_fixture']; assert json.load(open('/tmp/play-readiness.json'))['state'] == 'INCOMPLETE'"

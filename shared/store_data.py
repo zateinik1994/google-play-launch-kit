@@ -3,6 +3,7 @@
 import argparse
 import csv
 import json
+import math
 import re
 import sys
 from datetime import datetime, timezone
@@ -48,21 +49,37 @@ def package_id(value):
 
 
 def context(locale, country):
-    if not re.fullmatch(r"[a-z]{2,3}(?:-[A-Za-z0-9]{2,8})*", locale) or not re.fullmatch(r"[A-Z]{2}", country):
+    if not isinstance(locale, str) or not isinstance(country, str) or not re.fullmatch(r"[a-z]{2,3}(?:-[A-Za-z0-9]{2,8})*", locale) or not re.fullmatch(r"[A-Z]{2}", country):
         raise ValueError("Use explicit locale (en-GB) and country (GB)")
     # The scraper accepts language separately from the explicit country.
     return locale.replace("-", "_"), country
 
 
 def normalize_profile(data, package):
-    if not isinstance(data, dict) or not isinstance(data.get("title"), str):
+    package_id(package)
+    if not isinstance(data, dict) or not isinstance(data.get("title"), str) or not data["title"].strip():
         raise CollectionError("Unexpected public listing response; parser may need an update")
+    if data.get("appId") is not None and data["appId"] != package:
+        raise CollectionError("Public listing response belongs to a different package")
+    if any(data.get(field) is not None and not isinstance(data[field], str) for field in ("summary", "description", "developer", "installs", "currency", "url")):
+        raise CollectionError("Malformed public listing text; parser may need an update")
+    if data.get("screenshots") is not None and (not isinstance(data["screenshots"], list) or any(not isinstance(url, str) or not url.strip() for url in data["screenshots"])):
+        raise CollectionError("Malformed public listing screenshots")
+    for field in ("ratings", "minInstalls"):
+        if data.get(field) is not None and (type(data[field]) is not int or not 0 <= data[field] <= 2**63 - 1):
+            raise CollectionError("Malformed public listing count")
+    for field in ("score", "price"):
+        value = data.get(field)
+        if value is not None and (type(value) not in (int, float) or not 0 <= value <= (5 if field == "score" else sys.float_info.max) or not math.isfinite(value)):
+            raise CollectionError("Malformed public listing rating or price")
+    if data.get("offersIAP") is not None and type(data["offersIAP"]) is not bool:
+        raise CollectionError("Malformed public listing IAP flag")
     return {"package_name": package, "title": data["title"], "shortDescription": data.get("summary"),
             "fullDescription": data.get("description"), "developer": data.get("developer"),
             "rating": data.get("score"), "rating_count": data.get("ratings"),
             "install_bucket": data.get("installs"), "min_installs": data.get("minInstalls"),
             "price": data.get("price"), "currency": data.get("currency"), "offers_iap": data.get("offersIAP"),
-            "screenshots": data.get("screenshots", []), "url": data.get("url"), "updated": data.get("updated")}
+            "screenshots": data.get("screenshots"), "url": data.get("url"), "updated": data.get("updated")}
 
 
 def rank_snapshot(results, packages, query, locale, country, observed_at=None, source="provided search results"):
@@ -105,10 +122,14 @@ def normalize_reviews(rows):
 
 
 def collect(provider, operation, *, locale, country, packages=(), query=None, limit=30):
+    if operation not in {"profiles", "search", "ranks", "reviews"}:
+        raise ValueError("Unknown collection operation")
+    if not isinstance(packages, (list, tuple)):
+        raise ValueError("Packages must be a list of application IDs")
     lang, country = context(locale, country)
     for package in packages:
         package_id(package)
-    if not 1 <= limit <= (1000 if operation == "reviews" else 30):
+    if type(limit) is not int or not 1 <= limit <= (1000 if operation == "reviews" else 30):
         raise ValueError("Bounded limit: search/ranks 1–30; reviews 1–1000")
     if operation in {"search", "ranks"} and (not isinstance(query, str) or not query.strip()):
         raise ValueError("Non-empty query required")
@@ -156,7 +177,7 @@ def main(argv=None):
     try:
         output = Path(args.output)
         sidecar = output.with_suffix(output.suffix + ".meta.json")
-        if output.exists() or sidecar.exists():
+        if output.exists() or output.is_symlink() or sidecar.exists() or sidecar.is_symlink():
             raise ValueError("Output or metadata sidecar already exists")
         if output.suffix == ".csv" and args.operation not in {"ranks", "reviews"}:
             raise ValueError("CSV output is supported for ranks/reviews")

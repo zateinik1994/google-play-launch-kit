@@ -120,12 +120,38 @@ def snapshot(client, package):
         key = str(campaign["id"])
         if key in result["campaigns"]:
             raise AdsError("Duplicate campaign in snapshot.")
+        setting = campaign.get("appCampaignSetting")
+        if not isinstance(setting, dict) or campaign.get("resourceName") != f"customers/{client.customer}/campaigns/{key}" or setting.get("appId") != package or setting.get("appStore") != "GOOGLE_APP_STORE":
+            raise AdsError("Campaign snapshot resource/app identity differs from the requested scope.")
+        if not isinstance(row.get("campaignBudget", {}), dict):
+            raise AdsError("Campaign snapshot has an invalid budget object.")
         result["campaigns"][key] = row
     for rows, collection, field in ((groups, "adGroups", "adGroup"), (ads, "adGroupAds", "adGroupAd")):
         for row in rows:
-            name = row.get(field, {}).get("resourceName")
+            value, owner = row.get(field), row.get("campaign")
+            if not isinstance(value, dict) or not isinstance(owner, dict):
+                raise AdsError("Invalid serving resource/campaign object in snapshot.")
+            name = value.get("resourceName")
             if not isinstance(name, str) or name in result[collection]:
                 raise AdsError("Invalid or duplicate serving resource in snapshot.")
+            campaign_id_value = str(owner.get("id", ""))
+            if campaign_id_value not in result["campaigns"]:
+                raise AdsError("Serving resource belongs to an unverified campaign in the app snapshot.")
+            if field == "adGroup":
+                group_id = str(row[field].get("id", ""))
+                if not re.fullmatch(r"[1-9][0-9]*", group_id) or name != f"customers/{client.customer}/adGroups/{group_id}":
+                    raise AdsError("Ad group snapshot did not confirm its customer/resource ID.")
+            else:
+                group_value, ad_value = row.get("adGroup"), value.get("ad")
+                if not isinstance(group_value, dict) or not isinstance(ad_value, dict):
+                    raise AdsError("Ad snapshot has an invalid parent/ad object.")
+                group = group_value.get("resourceName")
+                if not isinstance(group, str):
+                    raise AdsError("Ad snapshot has an invalid parent resource name.")
+                parent = result["adGroups"].get(group)
+                ad_id = str(ad_value.get("id", ""))
+                if not parent or str(parent.get("campaign", {}).get("id", "")) != campaign_id_value or not re.fullmatch(r"[1-9][0-9]*", ad_id) or name != f"{group.split('/adGroups/')[0]}/adGroupAds/{group.rsplit('/', 1)[-1]}~{ad_id}":
+                    raise AdsError("Ad snapshot did not confirm its customer/parent/resource ID.")
             result[collection][name] = row
     return result
 
@@ -302,8 +328,10 @@ def execute_plan(client, saved, *, live=False, receipt_writer=None):
         if not isinstance(responses, list) or len(responses) != len(request["mutateOperations"]):
             raise AdsError("Mutation response did not confirm every operation.")
         for expected, actual in zip(request["mutateOperations"], responses):
+            result_kind = {"campaignBudgetOperation": "campaignBudgetResult", "campaignOperation": "campaignResult",
+                           "adGroupOperation": "adGroupResult", "adGroupAdOperation": "adGroupAdResult"}[next(iter(expected))]
             expected_name = next(iter(expected.values()))["update"]["resourceName"]
-            detail = next(iter(actual.values())) if isinstance(actual, dict) and len(actual) == 1 else None
+            detail = actual.get(result_kind) if isinstance(actual, dict) and len(actual) == 1 else None
             if not isinstance(detail, dict) or detail.get("resourceName") != expected_name:
                 raise AdsError("Mutation result did not confirm the requested resource.")
     except AdsError as exc:

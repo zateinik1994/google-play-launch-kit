@@ -148,7 +148,60 @@ class DeliveryTests(unittest.TestCase):
         transport = FakePublisher()
         with self.assertRaises(FileExistsError):
             self.apply(self.image_config(), transport)
-        self.assertFalse(any(c[0]=='UPLOAD' for c in transport.calls))
+        self.assertEqual(transport.calls, [])
+
+    def test_existing_backup_file_or_broken_symlink_blocks_edit(self):
+        for path in (self.root/'existing-file', self.root/'broken-link'):
+            if path.name == 'existing-file':
+                path.write_text('preserve me')
+            else:
+                path.symlink_to(self.root/'missing-directory')
+            transport = FakePublisher()
+            with self.subTest(path=path.name), self.assertRaises(FileExistsError):
+                ReleasePublisher('com.example.habits', transport).apply(self.image_config(), directory=self.root, backup_directory=path)
+            self.assertEqual(transport.calls, [])
+
+    def test_existing_backup_blocks_live_before_credentials(self):
+        config = self.root/'config.json'
+        config.write_text(json.dumps(self.image_config()))
+        self.backup.mkdir()
+        with patch('shared.play_release.ADCTransport', side_effect=AssertionError('network')), contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(main(['apply', '--live', '--config', str(config), '--backup-directory', str(self.backup)]), 2)
+
+    def test_invalid_enum_json_types_report_input_error_without_credentials(self):
+        for value in ([], {}, True, None):
+            for field in ('image_type', 'operation', 'status'):
+                config = self.image_config()
+                if field == 'status':
+                    config = self.config(tracks=[{'track':'internal', 'releases':[{'status':value, 'versionCodes':['42']}]}])
+                else:
+                    config['images'][0][field] = value
+                path = self.root/'config.json'
+                path.write_text(json.dumps(config))
+                with self.subTest(field=field, value=value), patch('shared.play_release.ADCTransport', side_effect=AssertionError('network')), contextlib.redirect_stderr(io.StringIO()):
+                    self.assertEqual(main(['apply', '--live', '--config', str(path), '--backup-directory', str(self.backup)]), 2)
+
+    def test_listing_rollback_clears_first_added_video_and_restores_existing_video(self):
+        class StatefulPublisher(FakePublisher):
+            def request(inner, method, url, *, payload=None, query=None):
+                response = super().request(method, url, payload=payload, query=query)
+                if method == 'PUT' and '/listings/' in url:
+                    inner.listings[payload['language']] = {key:value for key,value in payload.items() if key != 'language'}
+                return response
+        for original in (None, 'https://www.youtube.com/watch?v=old12345678'):
+            with self.subTest(original=original):
+                transport = StatefulPublisher()
+                if original:
+                    transport.listings['en-US']['video'] = original
+                backup = self.root/('without-video' if original is None else 'with-video')
+                client = ReleasePublisher('com.example.habits', transport)
+                client.apply(self.config(listings={'en-US':dict(LISTING['en-US'], video='https://www.youtube.com/watch?v=new12345678')}), backup_directory=backup)
+                rollback = json.loads((backup/'rollback.json').read_text())
+                snapshot = json.loads((backup/'snapshot.json').read_text())
+                self.assertEqual(rollback['listings']['en-US']['video'], original or '')
+                self.assertEqual(snapshot['listings']['en-US'].get('video'), original)
+                client.apply(rollback, backup_directory=self.root/(backup.name+'-restore'))
+                self.assertEqual(transport.listings['en-US']['video'], original or '')
 
     def test_bundle_actual_version_and_explicit_retained_codes(self):
         config = self.config(bundle={'file':'app.aab','expected_version_code':42}, tracks=[{'track':'internal', 'releases':[{'status':'completed','versionCodes':['41','$uploaded'],'releaseNotes':[{'language':'en-US','text':'Faster checklist.'}]}]}])
@@ -163,6 +216,26 @@ class DeliveryTests(unittest.TestCase):
             self.apply(self.config(bundle={'file':'app.aab','expected_version_code':43}))
         transaction=json.loads((self.backup/'transaction.json').read_text())
         self.assertEqual(transaction['status'], 'staging-failed')
+
+    def test_numeric_duplicate_or_expected_uploaded_version_rejected_before_api(self):
+        for codes, bundle in ((['42','0042'], None), (['42','$uploaded'], {'file':'app.aab','expected_version_code':42})):
+            config = self.config(tracks=[{'track':'internal', 'releases':[{'status':'completed','versionCodes':codes}]}])
+            if bundle:
+                config['bundle'] = bundle
+            transport = FakePublisher()
+            with self.subTest(codes=codes), self.assertRaisesRegex(ValueError, 'numerically unique'):
+                self.apply(config, transport)
+            self.assertEqual(transport.calls, [])
+
+    def test_actual_uploaded_version_cannot_duplicate_retained_version(self):
+        config = self.config(bundle={'file':'app.aab'}, tracks=[{'track':'internal', 'releases':[{'status':'completed','versionCodes':['0042','$uploaded']}]}])
+        transport = FakePublisher()
+        with self.assertRaisesRegex(ValueError, 'duplicates a retained version'):
+            self.apply(config, transport)
+        self.assertTrue(any(c[0]=='UPLOAD' for c in transport.calls))
+        self.assertFalse(any(c[0]=='PUT' and '/tracks/' in c[1] for c in transport.calls))
+        self.assertFalse(any(c[1].endswith(':commit') for c in transport.calls))
+        self.assertEqual(json.loads((self.backup/'transaction.json').read_text())['status'], 'staging-failed')
 
     def test_confirmed_commit_survives_receipt_write_failure(self):
         from shared.play_release import receipt
@@ -262,6 +335,43 @@ class DeliveryTests(unittest.TestCase):
         self.assertEqual(result['changes']['tracks'][0]['from']['releases'],[])
         with self.assertRaisesRegex(ValueError,'package'):
             plan(config,current={'package_name':'wrong'})
+
+    def test_release_state_reads_real_resource_without_creating_edit(self):
+        calls = []
+        summary = {'track':'wear:production', 'releaseName':'42', 'activeArtifacts':[{'versionCode':42}], 'releaseLifecycleState':'RELEASE_LIFECYCLE_STATE_APPROVED_NOT_PUBLISHED'}
+        class StateTransport:
+            def request(inner, method, url, **kwargs):
+                calls.append((method, url, kwargs))
+                return {'releases':[summary]}
+        result = ReleasePublisher('com.example.habits', StateTransport()).release_state('wear:production')
+        self.assertEqual(calls, [('GET', 'https://androidpublisher.googleapis.com/androidpublisher/v3/applications/com.example.habits/tracks/wear%3Aproduction/releases', {})])
+        self.assertEqual(result['releases'], [summary])
+        self.assertEqual(result['status'], 'live-read')
+        self.assertEqual(result['maximum_releases'], 20)
+        self.assertIn('retrieved_at_utc', result)
+
+    def test_release_state_malformed_or_mismatched_summaries_do_not_confirm_state(self):
+        class StateTransport:
+            def request(inner, *args, **kwargs):
+                return {'releases':releases}
+        for releases in ({}, [{'track':'internal'}], [{'track':'production','activeArtifacts':[{'versionCode':True}]}], [{'track':'production','releaseLifecycleState':[]}], [None]):
+            with self.subTest(releases=releases), self.assertRaises(PlayError):
+                ReleasePublisher('com.example.habits', StateTransport()).release_state('production')
+
+    def test_release_state_empty_collection_and_future_state_are_preserved(self):
+        for response in ({}, {'releases':[{'track':'production', 'releaseLifecycleState':'NEW_SERVER_STATE'}]}):
+            class StateTransport:
+                def request(inner, *args, **kwargs):
+                    return response
+            result = ReleasePublisher('com.example.habits', StateTransport()).release_state('production')
+            self.assertEqual(result['releases'], [dict(response['releases'][0],releaseName='',activeArtifacts=[])] if response else [])
+
+    def test_release_state_cli_defaults_offline_and_rejects_bad_track_before_credentials(self):
+        with patch('shared.play_release.ADCTransport', side_effect=AssertionError('network')), contextlib.redirect_stdout(io.StringIO()) as output:
+            self.assertEqual(main(['release-state','--package','com.example.habits','--track','production']), 0)
+        self.assertEqual(json.loads(output.getvalue())['status'], 'offline-read-plan')
+        with patch('shared.play_release.ADCTransport', side_effect=AssertionError('network')), contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(main(['release-state','--package','com.example.habits','--track','../production','--live']), 2)
 
 
 class MediaTransportTests(unittest.TestCase):

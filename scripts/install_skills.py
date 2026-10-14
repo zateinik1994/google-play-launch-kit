@@ -77,7 +77,8 @@ def main(argv=None):
             for skill in skills:
                 staged = Path(staging)/skill.name
                 if args.copy:
-                    shutil.copytree(skill, staged, symlinks=False, ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
+                    shutil.copytree(skill, staged, symlinks=False,
+                                    ignore=shutil.ignore_patterns("__pycache__", "*.pyc", "node_modules", ".venv", ".git", ".DS_Store"))
                 else:
                     staged.symlink_to(skill, target_is_directory=True)
             for skill in skills:
